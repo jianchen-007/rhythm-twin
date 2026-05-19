@@ -1,0 +1,15 @@
+.DS_Store
+*.swp
+*.swo
+.vscode/
+.idea/
+
+# Local environment files — never commit Supabase service_role key or any private creds
+.env
+.env.local
+*.local.json
+
+# Build/temp artifacts
+node_modules/
+dist/
+.cache/

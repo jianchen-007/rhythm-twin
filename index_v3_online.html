@@ -1,0 +1,1529 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Rhythm Runner — Train Your Digital Twin</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 16px;
+    background: #08081a;
+    color: #fff;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-height: 100vh;
+    user-select: none;
+  }
+  h1 {
+    margin: 4px 0 2px;
+    font-weight: 300;
+    letter-spacing: 6px;
+    font-size: 22px;
+    color: #f0a0c0;
+    text-shadow: 0 0 12px rgba(240,160,200,0.5);
+  }
+  .subtitle {
+    color: #888;
+    margin-bottom: 14px;
+    font-size: 12px;
+    letter-spacing: 2px;
+  }
+  canvas {
+    border: 1px solid #2a1a3a;
+    border-radius: 4px;
+    display: block;
+    box-shadow: 0 0 40px rgba(240,160,200,0.15);
+    outline: none;
+  }
+  #ui {
+    display: flex;
+    gap: 18px;
+    align-items: center;
+    margin: 14px 0 4px;
+    padding: 14px 22px;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid #2a1a3a;
+    border-radius: 8px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .mode-row {
+    display: flex;
+    gap: 10px;
+  }
+  button {
+    border: none;
+    padding: 10px 18px;
+    border-radius: 4px;
+    font-weight: 700;
+    cursor: pointer;
+    font-size: 13px;
+    letter-spacing: 1px;
+    transition: transform 0.1s, opacity 0.15s;
+    color: #1a0a2a;
+  }
+  button:hover:not(:disabled) { transform: scale(1.04); }
+  button:active:not(:disabled) { transform: scale(0.97); }
+  button:disabled { opacity: 0.35; cursor: not-allowed; }
+  button.practice  { background: linear-gradient(180deg, #c0e0b0, #80b070); }
+  button.train     { background: linear-gradient(180deg, #ffb0a0, #e08070); }
+  button.watchtwin { background: linear-gradient(180deg, #a0d0ff, #6090c0); }
+  button.active {
+    box-shadow: 0 0 0 2px #fff, 0 0 14px rgba(255,255,255,0.5);
+  }
+  button.secondary {
+    background: linear-gradient(180deg, #6090b0, #406080);
+    color: #fff;
+    font-size: 11px;
+    padding: 8px 14px;
+  }
+  .control {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    font-size: 11px;
+    color: #aaa;
+    letter-spacing: 1px;
+  }
+  .control label { display: flex; gap: 8px; align-items: center; }
+  .value { color: #f0a0c0; font-weight: 700; min-width: 32px; display: inline-block; }
+  input[type="range"] {
+    width: 140px;
+    accent-color: #f0a0c0;
+  }
+  .scores {
+    display: flex;
+    gap: 18px;
+    align-items: center;
+  }
+  #score, #twinScore {
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: 2px;
+  }
+  #score      { color: #ffd700; text-shadow: 0 0 12px rgba(255,215,0,0.45); }
+  #twinScore  { color: #80d0ff; text-shadow: 0 0 12px rgba(128,208,255,0.45); }
+  .hidden { display: none !important; }
+  .hint {
+    color: #666;
+    font-size: 11px;
+    margin-top: 10px;
+    letter-spacing: 1px;
+    text-align: center;
+    line-height: 1.7;
+    max-width: 760px;
+  }
+  #twinStatus { color: #80d0ff; }
+  kbd {
+    background: #2a1a3a;
+    border: 1px solid #4a2a5a;
+    border-bottom-width: 2px;
+    border-radius: 3px;
+    padding: 1px 6px;
+    color: #f0a0c0;
+    font-family: inherit;
+    font-size: 10px;
+  }
+  /* Mode badge overlaid on canvas */
+  .canvas-wrap { position: relative; }
+  #modeBadge {
+    position: absolute;
+    top: 12px;
+    left: 14px;
+    padding: 6px 12px;
+    border-radius: 4px;
+    font-size: 12px;
+    letter-spacing: 2px;
+    font-weight: 700;
+    display: none;
+    align-items: center;
+    gap: 8px;
+    background: rgba(0,0,0,0.55);
+    border: 1px solid rgba(255,255,255,0.15);
+    backdrop-filter: blur(4px);
+  }
+  #modeBadge.practice  { color: #c0e0b0; }
+  #modeBadge.train     { color: #ffb0a0; }
+  #modeBadge.watchtwin { color: #a0d0ff; }
+  .rec-dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: #ff3030;
+    box-shadow: 0 0 8px #ff3030;
+    animation: pulse 1s infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50%      { opacity: 0.4; transform: scale(0.8); }
+  }
+  /* Pause / fullscreen icon buttons */
+  button.icon-btn {
+    background: linear-gradient(180deg, #b0c0d0, #708090);
+    color: #1a0a2a;
+    min-width: 38px;
+    padding: 10px 12px;
+    font-size: 16px;
+    line-height: 1;
+  }
+  button.icon-btn:disabled { opacity: 0.35; }
+  /* Scale the canvas to the screen in fullscreen while preserving aspect ratio */
+  canvas:fullscreen {
+    width: min(100vw, calc(100vh * 960 / 520));
+    height: min(100vh, calc(100vw * 520 / 960));
+    background: #08081a;
+  }
+  /* Name-entry modal (shown once on first visit) */
+  #nameModal {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.85);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+    backdrop-filter: blur(8px);
+  }
+  #nameModal.visible { display: flex; }
+  #nameModal .panel {
+    background: linear-gradient(180deg, #1a0a2a, #08081a);
+    border: 1px solid #4a2a5a;
+    border-radius: 12px;
+    padding: 32px 36px;
+    width: 420px;
+    max-width: 90vw;
+    box-shadow: 0 0 60px rgba(240,160,200,0.25);
+    text-align: center;
+  }
+  #nameModal h2 {
+    color: #f0a0c0;
+    margin: 0 0 8px;
+    font-weight: 300;
+    letter-spacing: 4px;
+  }
+  #nameModal p {
+    color: #aaa;
+    font-size: 12px;
+    line-height: 1.6;
+    margin: 0 0 18px;
+  }
+  #nameModal input {
+    width: 100%;
+    padding: 12px 14px;
+    margin-bottom: 4px;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid #4a2a5a;
+    border-radius: 4px;
+    color: #fff;
+    font-size: 14px;
+    letter-spacing: 1px;
+    text-align: center;
+    font-family: inherit;
+  }
+  #nameModal input:focus { outline: none; border-color: #f0a0c0; }
+  #nameModal .hint-twin {
+    color: #80d0ff;
+    font-size: 11px;
+    margin: 8px 0 18px;
+    min-height: 14px;
+    letter-spacing: 1px;
+  }
+  #nameModal .consent {
+    color: #666;
+    font-size: 10px;
+    line-height: 1.5;
+    margin: 14px 0 18px;
+    letter-spacing: 0.5px;
+  }
+  #nameModal .row { display: flex; gap: 10px; justify-content: center; }
+  /* Player/twin name display below scores */
+  #identity {
+    font-size: 11px;
+    color: #888;
+    letter-spacing: 1.5px;
+    margin-top: 4px;
+    text-align: center;
+  }
+  #identity .you  { color: #ffd700; }
+  #identity .twin { color: #80d0ff; }
+  #identity .edit {
+    color: #666;
+    cursor: pointer;
+    margin-left: 8px;
+    text-decoration: underline;
+  }
+  #identity .edit:hover { color: #aaa; }
+</style>
+</head>
+<body>
+<h1>RHYTHM RUNNER</h1>
+<div class="subtitle">PRACTICE &nbsp;→&nbsp; TRAIN &nbsp;→&nbsp; WATCH YOUR TWIN PLAY</div>
+
+<div class="canvas-wrap">
+  <canvas id="game" width="960" height="520" tabindex="0"></canvas>
+  <div id="modeBadge"><span id="modeBadgeIcon"></span><span id="modeBadgeText"></span></div>
+</div>
+
+<div id="ui">
+  <div class="mode-row">
+    <button id="btnPractice" class="mode-btn practice">▶ PRACTICE</button>
+    <button id="btnTrain"    class="mode-btn train">● TRAIN</button>
+    <button id="btnWatchTwin" class="mode-btn watchtwin" disabled>▷ WATCH TWIN</button>
+    <button id="btnPause" class="icon-btn" title="Pause / resume (P)" disabled>⏸</button>
+    <button id="btnFullscreen" class="icon-btn" title="Toggle fullscreen (F)">⛶</button>
+  </div>
+  <div class="control">
+    <label>GRAVITY <span class="value" id="gravityVal">1.00</span></label>
+    <input type="range" id="gravity" min="0.3" max="2.5" step="0.05" value="1">
+  </div>
+  <div class="scores">
+    <div id="score">YOU 0</div>
+    <div id="twinScore">TWIN 0</div>
+  </div>
+  <button id="resetTwin" class="secondary">RESET TWIN</button>
+</div>
+<div id="identity"></div>
+
+<!-- Name-entry modal: shown once on first visit, also re-openable via the "edit" link in #identity -->
+<div id="nameModal">
+  <div class="panel">
+    <h2>WELCOME</h2>
+    <p>Enter a name so we can label your digital twin. You can leave this blank if you'd rather stay anonymous.</p>
+    <input id="nameInput" type="text" placeholder="your name" maxlength="40" autocomplete="off" />
+    <div class="hint-twin" id="twinPreview"></div>
+    <p class="consent">Your anonymous gameplay (tap timings only — no personal info) is sent to our research server to help build the digital twin model. No login required, no tracking across sites.</p>
+    <div class="row">
+      <button id="nameSubmit" class="mode-btn practice">START</button>
+      <button id="nameSkip" class="secondary">SKIP</button>
+    </div>
+  </div>
+</div>
+<div class="hint">
+  <b style="color:#c0e0b0">PRACTICE</b> = free play, nothing recorded &nbsp;•&nbsp;
+  <b style="color:#ffb0a0">TRAIN</b> = your taps teach the twin &nbsp;•&nbsp;
+  <b style="color:#a0d0ff">WATCH TWIN</b> = the twin plays alone<br>
+  <kbd>SPACE</kbd> TO JUMP — TAP MULTIPLE TIMES MID-AIR FOR HIGHER COINS &nbsp;•&nbsp;
+  <kbd>P</kbd> PAUSE &nbsp;•&nbsp; <kbd>F</kbd> FULLSCREEN<br>
+  <span id="twinStatus">TWIN: NOT YET TRAINED — TRY PRACTICE FIRST, THEN TRAIN</span>
+</div>
+
+<script>
+// ============ ONLINE BACKEND CONFIG ============
+// Replace these with your Supabase project values before deploying.
+// Both are safe to expose in client code: the anon key only grants the row-level-security
+// policy you configure (insert-only into the twin_sessions table). See DEPLOY.md.
+const SUPABASE_URL = '__SUPABASE_URL__';
+const SUPABASE_ANON_KEY = '__SUPABASE_ANON_KEY__';
+const GAME_VERSION = 'v3-online-2026-05';
+
+function isUploadConfigured() {
+  return SUPABASE_URL && !SUPABASE_URL.includes('__') &&
+         SUPABASE_ANON_KEY && !SUPABASE_ANON_KEY.includes('__');
+}
+
+async function uploadSession(record) {
+  if (!isUploadConfigured()) return;
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/twin_sessions`, {
+      method: 'POST',
+      headers: {
+        'apikey': SUPABASE_ANON_KEY,
+        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=minimal',
+      },
+      body: JSON.stringify(record),
+    });
+    if (!res.ok) console.warn('Upload failed:', res.status, await res.text());
+  } catch (e) {
+    console.warn('Upload error:', e);
+  }
+}
+
+// ============ IDENTITY (anon ID + optional user name) ============
+const ID_KEY = 'rhythm-twin-anon-id';
+const NAME_KEY = 'rhythm-twin-user-name';
+function generateAnonId() {
+  // RFC 4122 v4 UUID
+  return ([1e7]+-1e3+-4e3+-8e3+-1e11).replace(/[018]/g, c =>
+    (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c/4).toString(16));
+}
+let anonId = localStorage.getItem(ID_KEY);
+if (!anonId) { anonId = generateAnonId(); localStorage.setItem(ID_KEY, anonId); }
+let userName = localStorage.getItem(NAME_KEY) || '';
+function twinNameFor(name) {
+  const n = (name || '').trim();
+  if (!n) return `anon-${anonId.slice(0, 6)}-twin`;
+  return `${n}-twin`;
+}
+function refreshIdentity() {
+  const el = document.getElementById('identity');
+  const player = userName.trim() || `anon-${anonId.slice(0, 6)}`;
+  const twin = twinNameFor(userName);
+  el.innerHTML = `<span class="you">${escapeHTML(player)}</span> &nbsp;·&nbsp; <span class="twin">${escapeHTML(twin)}</span> <span class="edit" id="editName">edit</span>`;
+  document.getElementById('editName').addEventListener('click', () => showNameModal());
+}
+function escapeHTML(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+}
+
+// ============ AUDIO ============
+let audioCtx = null;
+function initAudio() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+}
+function playTone(freq, dur, startTime, type='triangle', vol=0.15) {
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = type;
+  osc.frequency.value = freq;
+  osc.connect(gain); gain.connect(audioCtx.destination);
+  gain.gain.setValueAtTime(0, startTime);
+  gain.gain.linearRampToValueAtTime(vol, startTime + 0.008);
+  gain.gain.exponentialRampToValueAtTime(0.0008, startTime + dur);
+  osc.start(startTime); osc.stop(startTime + dur + 0.02);
+}
+function playKick(startTime, vol=0.55) {
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(160, startTime);
+  osc.frequency.exponentialRampToValueAtTime(38, startTime + 0.12);
+  gain.gain.setValueAtTime(vol, startTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.2);
+  osc.connect(gain); gain.connect(audioCtx.destination);
+  osc.start(startTime); osc.stop(startTime + 0.22);
+}
+function playHat(startTime, vol=0.06) {
+  const bufSize = Math.floor(audioCtx.sampleRate * 0.05);
+  const buf = audioCtx.createBuffer(1, bufSize, audioCtx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < bufSize; i++) data[i] = (Math.random()*2-1) * (1 - i/bufSize);
+  const src = audioCtx.createBufferSource();
+  src.buffer = buf;
+  const filter = audioCtx.createBiquadFilter();
+  filter.type = 'highpass'; filter.frequency.value = 7000;
+  const gain = audioCtx.createGain(); gain.gain.value = vol;
+  src.connect(filter).connect(gain).connect(audioCtx.destination);
+  src.start(startTime);
+}
+function playCoinSound(freqBase=988) {
+  if (!audioCtx) return;
+  const t = audioCtx.currentTime;
+  playTone(freqBase, 0.12, t, 'sine', 0.1);
+  playTone(freqBase * 1.33, 0.15, t + 0.05, 'sine', 0.08);
+}
+function playJumpSound(forTwin=false) {
+  if (!audioCtx) return;
+  const t = audioCtx.currentTime;
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = 'square';
+  const baseFreq = forTwin ? 220 : 280;
+  osc.frequency.setValueAtTime(baseFreq, t);
+  osc.frequency.exponentialRampToValueAtTime(baseFreq * 2, t + 0.08);
+  gain.gain.setValueAtTime(forTwin ? 0.025 : 0.05, t);
+  gain.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
+  osc.connect(gain).connect(audioCtx.destination);
+  osc.start(t); osc.stop(t + 0.14);
+}
+
+// ============ SONG ============
+const BPM = 100;
+const BEAT_DUR = 60 / BPM;
+const GAPS = [2, 3, 2, 3, 4, 2, 3, 4, 2, 3, 2, 4, 3, 2, 3, 4, 2, 3, 4, 2, 3, 4, 2, 3];
+const SCALE = [220, 246.94, 261.63, 293.66, 329.63, 392, 440, 523.25, 587.33];
+const MELODY = [0, 2, 4, 5, 7, 4, 2, 0];
+
+function buildEmphasisTimesPerLoop() {
+  const times = [0]; let t = 0;
+  for (const g of GAPS) { t += g * BEAT_DUR; times.push(t); }
+  return times;
+}
+const PER_LOOP = buildEmphasisTimesPerLoop();
+const LOOP_DUR = PER_LOOP[PER_LOOP.length - 1] + BEAT_DUR;
+const TOTAL_LOOPS = 3;
+let emphasisTimes = [];
+
+function scheduleSong(startTime) {
+  emphasisTimes = [];
+  for (let loop = 0; loop < TOTAL_LOOPS; loop++) {
+    const loopOffset = loop * LOOP_DUR;
+    const totalBeats = Math.ceil(LOOP_DUR / BEAT_DUR);
+    for (let b = 0; b < totalBeats; b++) {
+      const t = startTime + loopOffset + b * BEAT_DUR;
+      playKick(t); playHat(t + BEAT_DUR / 2);
+    }
+    for (let i = 0; i < PER_LOOP.length; i++) {
+      const t = startTime + loopOffset + PER_LOOP[i];
+      const note = SCALE[MELODY[i % MELODY.length] % SCALE.length];
+      playTone(note, 0.35, t, 'square', 0.12);
+      playTone(note / 2, 0.6, t, 'sawtooth', 0.07);
+      emphasisTimes.push(loopOffset + PER_LOOP[i]);
+    }
+  }
+}
+
+// ============ DIGITAL TWIN STORE ============
+const TWIN_KEY = 'rhythm-runner-twin-v2';
+function loadTwinData() {
+  try {
+    const raw = localStorage.getItem(TWIN_KEY);
+    if (raw) {
+      const d = JSON.parse(raw);
+      return {
+        sessions: d.sessions || 0,
+        observations: d.observations || [],
+        scoreHistory: d.scoreHistory || [],
+        playerLevel: d.playerLevel || 1,
+      };
+    }
+  } catch (e) {}
+  return { sessions: 0, observations: [], scoreHistory: [], playerLevel: 1 };
+}
+
+const MAX_LEVEL = 4;
+const LEVEL_UP_RATIO = 0.8;  // collect ≥80% of coins → level up next session
+
+function getCoinsPerGap(level) {
+  return Math.max(1, Math.min(MAX_LEVEL, level));
+}
+function saveTwinData() {
+  try { localStorage.setItem(TWIN_KEY, JSON.stringify(twinData)); } catch (e) {}
+}
+let twinData = loadTwinData();
+
+function buildSparkline(values, total) {
+  // Render a tiny Unicode bar chart of recent sim scores (one block per session, up to 12)
+  if (!values || values.length === 0 || !total) return '';
+  const blocks = '▁▂▃▄▅▆▇█';
+  return values.slice(-12).map(v => {
+    const frac = Math.max(0, Math.min(1, v / total));
+    const idx = Math.min(blocks.length - 1, Math.max(0, Math.floor(frac * blocks.length)));
+    return blocks[idx];
+  }).join('');
+}
+
+function refreshTwinStatus() {
+  const el = document.getElementById('twinStatus');
+  const lvl = twinData.playerLevel || 1;
+  if (twinData.sessions === 0 && twinData.observations.length === 0) {
+    el.textContent = `LEVEL ${lvl} · TWIN NOT YET TRAINED — TRY PRACTICE FIRST, THEN TRAIN`;
+  } else {
+    const sh = twinData.scoreHistory || [];
+    const sims = sh.filter(s => s.twinScoreSim != null);
+    let txt = `LEVEL ${lvl} · TWIN: ${twinData.sessions} SESSION${twinData.sessions === 1 ? '' : 'S'}`;
+    if (sims.length > 0) {
+      const last = sims[sims.length - 1];
+      const best = Math.max(...sims.map(s => s.twinScoreSim));
+      const total = last.totalCoins || 74;
+      const delta = sims.length > 1
+        ? (last.twinScoreSim - sims[sims.length - 2].twinScoreSim)
+        : null;
+      const deltaStr = delta == null ? '' : (delta > 0 ? ` (+${delta})` : delta < 0 ? ` (${delta})` : ' (=)');
+      txt += ` · SIM ${last.twinScoreSim}/${total}${deltaStr} · BEST ${best}/${total}`;
+      const spark = buildSparkline(sims.map(s => s.twinScoreSim), total);
+      if (spark) txt += ` · ${spark}`;
+    } else {
+      txt += ` (${twinData.observations.length} OBSERVATIONS)`;
+    }
+    el.textContent = txt;
+  }
+  document.getElementById('btnWatchTwin').disabled = (twinData.sessions === 0);
+}
+
+// ============ GAME ============
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const W = canvas.width;
+const H = canvas.height;
+const GROUND_Y = H - 90;
+const SHIP_X = 220;
+
+const BASE_GRAVITY = 1100;
+const SCROLL_SPEED = 230;
+const JUMP_IMPULSE = 380;
+const MAX_UP_VELOCITY = 620;
+// v1 used 1100/8 = 137.5 here, which placed coins above the player's max reachable height
+// (4-beat coin at 792 px vs max apex 175 px). Scaled down so every coin tier is reachable at default gravity.
+// Heights: 2-beat ≈ 43 px (1 tap), 3-beat ≈ 97 px (2 taps), 4-beat ≈ 173 px (2 taps to cap).
+const REF_GRAVITY_FOR_COINS = 30;
+
+// Mode: null | 'practice' | 'train' | 'watchtwin'
+let currentMode = null;
+
+// Game progress 0..1 (set every frame in update). Used by moon, FINAL STRETCH cue, and tap fatigue.
+let tProgress = 0;
+
+let isPaused = false;
+let leveledUpThisSession = false;  // set by saveSession, displayed in the menu after a level-up
+
+let gravityMult = 1.0;
+let score = 0;
+let twinScore = 0;
+let isPlaying = false;
+let songStartTime = 0;
+let currentSongTime = 0;
+let coins = [];
+let stars = [];
+let dust = [];
+let jumpFlashes = [];
+let twinDust = [];
+
+const ship = { y: GROUND_Y, vy: 0, onGround: true, tilt: 0 };
+const twinShip = { y: GROUND_Y, vy: 0, onGround: true, tilt: 0 };
+
+// Current play's recording (used only in TRAIN mode)
+let currentPlayObservations = [];
+let segmentTaps = [];
+let currentSegmentIdx = -1;
+let sessionSavedThisPlay = false;
+
+// Twin's scheduled taps (sampled in WATCH-TWIN mode)
+let twinTapSchedule = [];
+
+function initStars() {
+  stars = [];
+  for (let i = 0; i < 110; i++) {
+    stars.push({
+      x: Math.random() * W * 5,
+      y: Math.random() * (GROUND_Y - 60),
+      size: Math.random() * 1.6 + 0.3,
+      twinkle: Math.random() * Math.PI * 2,
+      depth: Math.random() * 0.3 + 0.05,
+    });
+  }
+}
+
+// Twin self-evaluation: replay the twin's sampler against the current level with no
+// rendering or audio, return how many coins it would have collected. Stochastic (sampler
+// picks randomly), so simulateTwinScoresAvg averages several runs for a stable read.
+function simulateTwinScore() {
+  if (twinData.observations.length === 0 || coins.length === 0 || emphasisTimes.length === 0) return 0;
+  const sched = [];
+  for (let i = 0; i < emphasisTimes.length - 1; i++) {
+    const t1 = emphasisTimes[i];
+    const t2 = emphasisTimes[i + 1];
+    const gapBeats = Math.round((t2 - t1) / BEAT_DUR);
+    let cands = twinData.observations.filter(o => o.gapBeats === gapBeats);
+    if (cands.length === 0) {
+      let bestDiff = Infinity;
+      for (const o of twinData.observations) {
+        const d = Math.abs(o.gapBeats - gapBeats);
+        if (d < bestDiff) bestDiff = d;
+      }
+      cands = twinData.observations.filter(o => Math.abs(o.gapBeats - gapBeats) === bestDiff);
+    }
+    if (cands.length === 0) continue;
+    const ch = cands[Math.floor(Math.random() * cands.length)];
+    for (const norm of ch.taps) sched.push(t1 + norm * (t2 - t1));
+  }
+  sched.sort((a, b) => a - b);
+
+  const collected = new Array(coins.length).fill(false);
+  const dt = 1 / 120;
+  const totalGameTime = emphasisTimes[emphasisTimes.length - 1];
+  const songEnd = totalGameTime + 1.0;
+  const g = BASE_GRAVITY * gravityMult;
+  let y = GROUND_Y, vy = 0, schedIdx = 0, score = 0;
+
+  for (let t = 0; t < songEnd; t += dt) {
+    const tp = Math.max(0, Math.min(1, t / totalGameTime));
+    const ramp = Math.max(0, Math.min(1, (tp - 0.5) * 2));
+    const imp = JUMP_IMPULSE - 100 * ramp;
+    while (schedIdx < sched.length && sched[schedIdx] <= t) {
+      vy = Math.max(vy - imp, -MAX_UP_VELOCITY);
+      schedIdx++;
+    }
+    vy += g * dt;
+    y += vy * dt;
+    if (y >= GROUND_Y) { y = GROUND_Y; vy = 0; }
+    for (let ci = 0; ci < coins.length; ci++) {
+      if (collected[ci]) continue;
+      const c = coins[ci];
+      const screenX = SHIP_X + SCROLL_SPEED * (c.time - t);
+      const dx = screenX - SHIP_X;
+      const coinY = GROUND_Y - c.height;
+      if (dx > -22 && dx < 22 && Math.abs(coinY - y) < 24) {
+        collected[ci] = true;
+        score++;
+      }
+    }
+  }
+  return score;
+}
+
+function simulateTwinScoresAvg(n = 5) {
+  const scores = [];
+  for (let i = 0; i < n; i++) scores.push(simulateTwinScore());
+  return Math.round(scores.reduce((a, b) => a + b, 0) / scores.length);
+}
+
+function planTwinSchedule() {
+  twinTapSchedule = [];
+  if (twinData.observations.length === 0) return;
+  for (let i = 0; i < emphasisTimes.length - 1; i++) {
+    const t1 = emphasisTimes[i];
+    const t2 = emphasisTimes[i + 1];
+    const gapBeats = Math.round((t2 - t1) / BEAT_DUR);
+    let candidates = twinData.observations.filter(o => o.gapBeats === gapBeats);
+    if (candidates.length === 0) {
+      let bestDiff = Infinity;
+      for (const o of twinData.observations) {
+        const d = Math.abs(o.gapBeats - gapBeats);
+        if (d < bestDiff) bestDiff = d;
+      }
+      candidates = twinData.observations.filter(o => Math.abs(o.gapBeats - gapBeats) === bestDiff);
+    }
+    if (candidates.length === 0) continue;
+    const chosen = candidates[Math.floor(Math.random() * candidates.length)];
+    for (const norm of chosen.taps) {
+      twinTapSchedule.push(t1 + norm * (t2 - t1));
+    }
+  }
+  twinTapSchedule.sort((a, b) => a - b);
+}
+
+function setModeBadge() {
+  const badge = document.getElementById('modeBadge');
+  const icon  = document.getElementById('modeBadgeIcon');
+  const text  = document.getElementById('modeBadgeText');
+  badge.classList.remove('practice', 'train', 'watchtwin');
+  if (!currentMode) { badge.style.display = 'none'; return; }
+  badge.style.display = 'inline-flex';
+  badge.classList.add(currentMode);
+  if (currentMode === 'practice') {
+    icon.innerHTML = ''; text.textContent = 'PRACTICE — NOT RECORDED';
+  } else if (currentMode === 'train') {
+    icon.innerHTML = '<span class="rec-dot"></span>';
+    text.textContent = `REC · TRAINING SESSION ${twinData.sessions + 1}`;
+  } else if (currentMode === 'watchtwin') {
+    icon.innerHTML = '';
+    text.textContent = `WATCHING TWIN · TRAINED ON ${twinData.sessions} SESSION${twinData.sessions === 1 ? '' : 'S'}`;
+  }
+}
+
+function setActiveButton() {
+  for (const id of ['btnPractice', 'btnTrain', 'btnWatchTwin']) {
+    document.getElementById(id).classList.remove('active');
+  }
+  if (currentMode === 'practice') document.getElementById('btnPractice').classList.add('active');
+  if (currentMode === 'train')    document.getElementById('btnTrain').classList.add('active');
+  if (currentMode === 'watchtwin') document.getElementById('btnWatchTwin').classList.add('active');
+}
+
+function setScoreVisibility() {
+  const playerScoreEl = document.getElementById('score');
+  const twinScoreEl   = document.getElementById('twinScore');
+  if (currentMode === 'practice' || currentMode === 'train') {
+    playerScoreEl.classList.remove('hidden');
+    twinScoreEl.classList.add('hidden');
+  } else if (currentMode === 'watchtwin') {
+    playerScoreEl.classList.add('hidden');
+    twinScoreEl.classList.remove('hidden');
+  } else {
+    playerScoreEl.classList.remove('hidden');
+    twinScoreEl.classList.remove('hidden');
+  }
+}
+
+function togglePause() {
+  if (!isPlaying || !audioCtx) return;
+  if (isPaused) {
+    audioCtx.resume();
+    isPaused = false;
+  } else {
+    audioCtx.suspend();
+    isPaused = true;
+  }
+  updatePauseButton();
+}
+
+function updatePauseButton() {
+  const btn = document.getElementById('btnPause');
+  btn.textContent = isPaused ? '▶' : '⏸';
+  btn.disabled = !isPlaying;
+}
+
+function toggleFullscreen() {
+  if (document.fullscreenElement) {
+    document.exitFullscreen();
+  } else if (canvas.requestFullscreen) {
+    canvas.requestFullscreen().catch(() => {});
+  }
+}
+
+function startGame(mode) {
+  initAudio();
+  // Resume audio if a previous session left it suspended
+  if (isPaused && audioCtx) {
+    audioCtx.resume();
+    isPaused = false;
+  }
+  // If we're interrupting a TRAIN session, save what we have first
+  if (isPlaying && currentMode === 'train' && !sessionSavedThisPlay) {
+    saveSession();
+  }
+
+  currentMode = mode;
+  score = 0; twinScore = 0;
+  leveledUpThisSession = false;
+  coins = []; dust = []; twinDust = []; jumpFlashes = [];
+  ship.y = GROUND_Y; ship.vy = 0; ship.onGround = true; ship.tilt = 0;
+  twinShip.y = GROUND_Y; twinShip.vy = 0; twinShip.onGround = true; twinShip.tilt = 0;
+  currentPlayObservations = [];
+  segmentTaps = [];
+  currentSegmentIdx = -1;
+  sessionSavedThisPlay = false;
+
+  const launchAt = audioCtx.currentTime + 1.5;
+  scheduleSong(launchAt);
+  songStartTime = launchAt;
+
+  // Coin density scales with player level: 1 → 1 coin/gap, 2 → 2 coins/gap, etc.
+  // All coins in a gap are at the same altitude (gap²-scaled). Extra coins force the
+  // player to sustain altitude longer via rapid taps, not just hit a single apex.
+  const cpg = getCoinsPerGap(twinData.playerLevel || 1);
+  for (let i = 0; i < emphasisTimes.length - 1; i++) {
+    const t1 = emphasisTimes[i];
+    const t2 = emphasisTimes[i + 1];
+    const gap = t2 - t1;
+    const h = REF_GRAVITY_FOR_COINS * gap * gap;
+    for (let j = 1; j <= cpg; j++) {
+      const fraction = j / (cpg + 1);  // evenly spaced between t1 and t2
+      coins.push({
+        time: t1 + fraction * gap,
+        gapSec: gap,
+        height: h,
+        collected: false,
+        twinCollected: false,
+        missed: false,
+      });
+    }
+  }
+
+  // Only build twin schedule in WATCH-TWIN mode
+  if (mode === 'watchtwin') {
+    planTwinSchedule();
+  } else {
+    twinTapSchedule = [];
+  }
+
+  setModeBadge();
+  setActiveButton();
+  setScoreVisibility();
+
+  isPlaying = true;
+  updatePauseButton();
+  canvas.focus();
+}
+
+function tryJump() {
+  if (!isPlaying) return;
+  // In WATCH-TWIN mode the human is a spectator; ignore input
+  if (currentMode === 'watchtwin') return;
+
+  ship.vy = Math.max(ship.vy - effectiveJumpImpulse(), -MAX_UP_VELOCITY);
+  ship.onGround = false;
+  jumpFlashes.push({ x: SHIP_X, y: ship.y, life: 0.25, maxLife: 0.25, color: '255,220,255' });
+  playJumpSound(false);
+
+  // Only record taps when explicitly training
+  if (currentMode === 'train') {
+    recordPlayerTap();
+  }
+}
+
+function recordPlayerTap() {
+  if (currentSongTime < 0) return;
+  let segIdx = -1;
+  for (let i = 0; i < emphasisTimes.length - 1; i++) {
+    if (currentSongTime >= emphasisTimes[i] && currentSongTime < emphasisTimes[i+1]) {
+      segIdx = i; break;
+    }
+  }
+  if (segIdx >= 0) {
+    const t1 = emphasisTimes[segIdx];
+    const t2 = emphasisTimes[segIdx + 1];
+    const norm = (currentSongTime - t1) / (t2 - t1);
+    segmentTaps.push(Math.max(0, Math.min(1, norm)));
+  }
+}
+
+function finalizeCurrentSegment() {
+  if (currentSegmentIdx < 0 || currentSegmentIdx >= emphasisTimes.length - 1) return;
+  const t1 = emphasisTimes[currentSegmentIdx];
+  const t2 = emphasisTimes[currentSegmentIdx + 1];
+  const gapBeats = Math.round((t2 - t1) / BEAT_DUR);
+  currentPlayObservations.push({
+    gapBeats,
+    taps: [...segmentTaps],
+    gravity: gravityMult,
+  });
+  segmentTaps = [];
+}
+
+function checkSegmentCrossing() {
+  let segIdx = -1;
+  for (let i = 0; i < emphasisTimes.length - 1; i++) {
+    if (currentSongTime >= emphasisTimes[i] && currentSongTime < emphasisTimes[i+1]) {
+      segIdx = i; break;
+    }
+  }
+  if (segIdx !== currentSegmentIdx) {
+    if (currentSegmentIdx >= 0 && currentMode === 'train') finalizeCurrentSegment();
+    currentSegmentIdx = segIdx;
+  }
+}
+
+function saveSession() {
+  if (sessionSavedThisPlay) return;
+  if (currentMode !== 'train') { sessionSavedThisPlay = true; return; }
+  if (currentSegmentIdx >= 0) finalizeCurrentSegment();
+  if (currentPlayObservations.length > 0) {
+    for (const obs of currentPlayObservations) twinData.observations.push(obs);
+    twinData.sessions++;
+    if (!twinData.scoreHistory) twinData.scoreHistory = [];
+    // Twin self-evaluation: simulate how the (now-updated) twin would have done on this level
+    const twinSim = simulateTwinScoresAvg(5);
+    const levelAtSession = twinData.playerLevel || 1;
+    twinData.scoreHistory.push({
+      session: twinData.sessions,
+      playerScore: score,
+      twinScore: twinScore,           // 0 in TRAIN mode (twin doesn't play live)
+      twinScoreSim: twinSim,           // simulated twin performance against this level
+      totalCoins: coins.length,
+      level: levelAtSession,
+      observationCount: currentPlayObservations.length,
+      timestamp: new Date().toISOString(),
+    });
+    // Level up if the player caught at least LEVEL_UP_RATIO of the coins this session
+    if (score >= Math.ceil(LEVEL_UP_RATIO * coins.length) && levelAtSession < MAX_LEVEL) {
+      twinData.playerLevel = levelAtSession + 1;
+      leveledUpThisSession = true;
+    }
+    if (twinData.observations.length > 3000) {
+      twinData.observations = twinData.observations.slice(-3000);
+    }
+    saveTwinData();
+    refreshTwinStatus();
+    setModeBadge();
+
+    // Auto-upload the session to the research backend (no-op if not configured)
+    uploadSession({
+      anon_id: anonId,
+      user_name: userName || null,
+      twin_name: twinNameFor(userName),
+      game_version: GAME_VERSION,
+      session_num: twinData.sessions,
+      level: levelAtSession,
+      player_score: score,
+      twin_score_sim: twinSim,
+      total_coins: coins.length,
+      observations: currentPlayObservations,
+      gravity_mult: gravityMult,
+      user_agent: navigator.userAgent,
+      leveled_up: leveledUpThisSession,
+    });
+  }
+  sessionSavedThisPlay = true;
+}
+
+// Name-entry modal
+function showNameModal() {
+  const m = document.getElementById('nameModal');
+  const input = document.getElementById('nameInput');
+  const preview = document.getElementById('twinPreview');
+  input.value = userName;
+  preview.textContent = userName.trim() ? `your twin will be: ${twinNameFor(userName)}` : '';
+  m.classList.add('visible');
+  setTimeout(() => input.focus(), 50);
+}
+function hideNameModal() {
+  document.getElementById('nameModal').classList.remove('visible');
+}
+function commitName(rawName) {
+  userName = (rawName || '').trim().slice(0, 40);
+  localStorage.setItem(NAME_KEY, userName);
+  refreshIdentity();
+  hideNameModal();
+}
+
+function spawnDust(arr, x, y, color='255,200,230') {
+  for (let i = 0; i < 10; i++) {
+    arr.push({
+      x, y, color,
+      vx: (Math.random() - 0.5) * 100 - 30,
+      vy: -Math.random() * 80 - 20,
+      life: 0.55 + Math.random() * 0.2,
+      maxLife: 0.7,
+    });
+  }
+}
+
+function updatePhysics(s, dt, g) {
+  s.vy += g * dt;
+  s.y += s.vy * dt;
+  if (s.y >= GROUND_Y) {
+    const wasFlying = !s.onGround;
+    s.y = GROUND_Y; s.vy = 0; s.onGround = true;
+    return wasFlying;
+  }
+  s.tilt = Math.max(-0.5, Math.min(0.5, s.vy / 900));
+  return false;
+}
+
+let lastFrameTime = performance.now();
+
+// Tap fatigue: each tap gives less upward velocity in the final half of the song.
+// JUMP_IMPULSE (380) → 280 linearly over t = 0.5 .. 1.0. Player needs ~1.4x as many taps
+// late game. Cap unchanged, so all coins remain reachable — just more effortful.
+function effectiveJumpImpulse() {
+  const ramp = Math.max(0, Math.min(1, (tProgress - 0.5) * 2));
+  return JUMP_IMPULSE - 100 * ramp;
+}
+
+function update(dt) {
+  if (!isPlaying || !audioCtx) return;
+  currentSongTime = audioCtx.currentTime - songStartTime;
+
+  // Refresh game-progress used by moon/HUD/physics
+  const totalGameTime = emphasisTimes.length > 0
+    ? emphasisTimes[emphasisTimes.length - 1]
+    : LOOP_DUR * TOTAL_LOOPS;
+  tProgress = (currentSongTime > 0)
+    ? Math.max(0, Math.min(1, currentSongTime / totalGameTime))
+    : 0;
+
+  checkSegmentCrossing();
+
+  const g = BASE_GRAVITY * gravityMult;
+
+  // Player physics: only in PRACTICE or TRAIN
+  if (currentMode === 'practice' || currentMode === 'train') {
+    const playerLanded = updatePhysics(ship, dt, g);
+    if (playerLanded && Math.abs(ship.vy) > 0) spawnDust(dust, SHIP_X, GROUND_Y);
+    ship.tilt = Math.max(-0.5, Math.min(0.5, ship.vy / 900));
+  }
+
+  // Twin physics: only in WATCH TWIN
+  if (currentMode === 'watchtwin') {
+    const twinLanded = updatePhysics(twinShip, dt, g);
+    if (twinLanded) spawnDust(twinDust, SHIP_X, GROUND_Y, '128,208,255');
+    twinShip.tilt = Math.max(-0.5, Math.min(0.5, twinShip.vy / 900));
+
+    while (twinTapSchedule.length > 0 && twinTapSchedule[0] <= currentSongTime) {
+      twinTapSchedule.shift();
+      twinShip.vy = Math.max(twinShip.vy - effectiveJumpImpulse(), -MAX_UP_VELOCITY);
+      twinShip.onGround = false;
+      jumpFlashes.push({ x: SHIP_X, y: twinShip.y, life: 0.25, maxLife: 0.25, color: '128,208,255' });
+      playJumpSound(true);
+    }
+  }
+
+  // Coin collection — only the active actor can collect in each mode
+  for (const coin of coins) {
+    const screenX = SHIP_X + SCROLL_SPEED * (coin.time - currentSongTime);
+    const dx = screenX - SHIP_X;
+    const coinY = GROUND_Y - coin.height;
+    if ((currentMode === 'practice' || currentMode === 'train')
+        && !coin.collected && dx > -22 && dx < 22 && Math.abs(coinY - ship.y) < 24) {
+      coin.collected = true;
+      coin.collectedAt = currentSongTime;
+      score++;
+      playCoinSound(988);
+    }
+    if (currentMode === 'watchtwin'
+        && !coin.twinCollected && dx > -22 && dx < 22 && Math.abs(coinY - twinShip.y) < 24) {
+      coin.twinCollected = true;
+      coin.twinCollectedAt = currentSongTime;
+      twinScore++;
+      playCoinSound(740);
+    }
+    if (!coin.collected && !coin.twinCollected && screenX < SHIP_X - 30) coin.missed = true;
+  }
+
+  for (const arr of [dust, twinDust]) {
+    for (const d of arr) {
+      d.x += d.vx * dt; d.y += d.vy * dt;
+      d.vy += 240 * dt; d.life -= dt;
+    }
+  }
+  dust = dust.filter(d => d.life > 0);
+  twinDust = twinDust.filter(d => d.life > 0);
+  for (const f of jumpFlashes) f.life -= dt;
+  jumpFlashes = jumpFlashes.filter(f => f.life > 0);
+
+  const lastT = emphasisTimes[emphasisTimes.length - 1];
+  if (currentSongTime > lastT + 2 && !sessionSavedThisPlay) {
+    if (currentMode === 'train') saveSession();
+    else sessionSavedThisPlay = true;
+    // Return to menu so the player can see their updated twin progress (sparkline, sim score)
+    isPlaying = false;
+    setModeBadge();
+    updatePauseButton();
+  }
+}
+
+// ============ RENDER ============
+function draw() {
+  const grad = ctx.createLinearGradient(0, 0, 0, GROUND_Y);
+  grad.addColorStop(0, '#0a0420');
+  grad.addColorStop(0.4, '#2a0a3a');
+  grad.addColorStop(0.85, '#5a1a4a');
+  grad.addColorStop(1, '#7a3a4a');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, GROUND_Y);
+
+  const scrollX = SCROLL_SPEED * Math.max(0, currentSongTime);
+
+  for (const star of stars) {
+    const wx = star.x - scrollX * star.depth;
+    const x = ((wx % (W * 1.5)) + W * 1.5) % (W * 1.5);
+    if (x > W + 2) continue;
+    const alpha = 0.35 + 0.45 * Math.sin(currentSongTime * 1.5 + star.twinkle);
+    ctx.fillStyle = `rgba(255,240,255,${alpha})`;
+    ctx.fillRect(x, star.y, star.size, star.size);
+  }
+
+  // Moon = game-progress indicator (tProgress is refreshed in update() each frame).
+  // Rises on the right at t=0, arcs overhead at t=0.5, sets on the left at t=1.
+  // Warms to a red sunset near the end.
+  const moonX = (W - 80) - (W - 160) * tProgress;
+  const moonY = 80 + 140 * Math.pow(2 * tProgress - 1, 2);
+  const sunset = Math.max(0, Math.min(1, (tProgress - 0.5) * 2));
+  const lerp = (a, b, t) => Math.floor(a + (b - a) * t);
+  const moonInner = `rgb(255,${lerp(176, 110, sunset)},${lerp(208, 90, sunset)})`;
+  const moonMid   = `rgb(${lerp(160, 220, sunset)},${lerp(64, 50, sunset)},${lerp(112, 50, sunset)})`;
+  const moonGrad = ctx.createRadialGradient(moonX - 15, moonY - 10, 10, moonX, moonY, 60);
+  moonGrad.addColorStop(0, moonInner);
+  moonGrad.addColorStop(0.7, moonMid);
+  moonGrad.addColorStop(1, '#401030');
+  ctx.fillStyle = moonGrad;
+  ctx.beginPath();
+  ctx.arc(moonX, moonY, 55, 0, Math.PI * 2);
+  ctx.fill();
+  // Faint horizon glow on the left in the final stretch, like dusk light
+  if (sunset > 0.3) {
+    const horizonGrad = ctx.createLinearGradient(0, GROUND_Y - 60, 0, GROUND_Y);
+    horizonGrad.addColorStop(0, 'rgba(0,0,0,0)');
+    horizonGrad.addColorStop(1, `rgba(255,140,90,${(sunset - 0.3) * 0.25})`);
+    ctx.fillStyle = horizonGrad;
+    ctx.fillRect(0, GROUND_Y - 60, W * 0.45, 60);
+  }
+
+  ctx.fillStyle = '#1a0830';
+  ctx.beginPath(); ctx.moveTo(0, GROUND_Y);
+  for (let x = 0; x <= W; x += 40) {
+    const wx = x + scrollX * 0.25;
+    const y = GROUND_Y - 90 - Math.sin(wx * 0.004) * 35 - Math.sin(wx * 0.011) * 22;
+    ctx.lineTo(x, y);
+  }
+  ctx.lineTo(W, GROUND_Y); ctx.fill();
+
+  ctx.fillStyle = '#0a0418';
+  ctx.beginPath(); ctx.moveTo(0, GROUND_Y);
+  for (let x = 0; x <= W; x += 25) {
+    const wx = x + scrollX * 0.55;
+    const y = GROUND_Y - 55 - Math.sin(wx * 0.008) * 28 - Math.cos(wx * 0.018) * 18;
+    ctx.lineTo(x, y);
+  }
+  ctx.lineTo(W, GROUND_Y); ctx.fill();
+
+  const groundGrad = ctx.createLinearGradient(0, GROUND_Y, 0, H);
+  groundGrad.addColorStop(0, '#1a0828');
+  groundGrad.addColorStop(1, '#000');
+  ctx.fillStyle = groundGrad;
+  ctx.fillRect(0, GROUND_Y, W, H - GROUND_Y);
+
+  ctx.strokeStyle = 'rgba(240,160,200,0.35)'; ctx.lineWidth = 1;
+  const gridSpacing = 50;
+  const gridOffset = scrollX % gridSpacing;
+  for (let i = -gridSpacing; i < W + gridSpacing * 2; i += gridSpacing) {
+    const x = i - gridOffset;
+    ctx.beginPath(); ctx.moveTo(x, GROUND_Y);
+    const dx = (x - W / 2) * 3;
+    ctx.lineTo(x + dx * 0.6, H); ctx.stroke();
+  }
+  for (let i = 1; i < 8; i++) {
+    const ys = GROUND_Y + Math.pow(i, 1.8) * 3.2;
+    if (ys > H) break;
+    ctx.beginPath(); ctx.moveTo(0, ys); ctx.lineTo(W, ys); ctx.stroke();
+  }
+
+  for (let i = 0; i < emphasisTimes.length; i++) {
+    const t = emphasisTimes[i];
+    const screenX = SHIP_X + SCROLL_SPEED * (t - currentSongTime);
+    if (screenX < -30 || screenX > W + 30) continue;
+    const proximity = Math.max(0, 1 - Math.abs(t - currentSongTime) * 3);
+    ctx.fillStyle = `rgba(255,200,230,${0.3 + 0.7 * proximity})`;
+    ctx.fillRect(screenX - 2, GROUND_Y - 6, 4, 12);
+    if (proximity > 0.4) {
+      ctx.fillStyle = `rgba(255,255,255,${proximity * 0.5})`;
+      ctx.beginPath();
+      ctx.arc(screenX, GROUND_Y, 22 * proximity, 0, Math.PI * 2); ctx.fill();
+      const pillarGrad = ctx.createLinearGradient(screenX, GROUND_Y - 250, screenX, GROUND_Y);
+      pillarGrad.addColorStop(0, 'rgba(255,200,230,0)');
+      pillarGrad.addColorStop(1, `rgba(255,200,230,${proximity * 0.3})`);
+      ctx.fillStyle = pillarGrad;
+      ctx.fillRect(screenX - 1, GROUND_Y - 250, 2, 250);
+    }
+  }
+
+  for (const arr of [dust, twinDust]) {
+    for (const d of arr) {
+      const a = d.life / d.maxLife;
+      ctx.fillStyle = `rgba(${d.color},${a * 0.6})`;
+      ctx.fillRect(d.x - 2, d.y - 2, 3, 3);
+    }
+  }
+
+  for (const coin of coins) {
+    const screenX = SHIP_X + SCROLL_SPEED * (coin.time - currentSongTime);
+    if (screenX < -30 || screenX > W + 30) continue;
+    const y = GROUND_Y - coin.height;
+
+    // Unified burst: same shape and motion whether player or twin took the coin,
+    // just a different color. The idle coin disappears the moment either collector grabs it.
+    let burstColor = null, burstAt = null;
+    if (coin.collected) {
+      burstColor = '255,215,0';        // gold for player
+      burstAt = coin.collectedAt;
+    } else if (coin.twinCollected) {
+      burstColor = '128,208,255';      // cyan for twin
+      burstAt = coin.twinCollectedAt;
+    }
+
+    if (burstColor !== null) {
+      const elapsed = currentSongTime - burstAt;
+      if (elapsed < 0.5) {
+        const a = 1 - elapsed / 0.5;
+        const r = 10 + elapsed * 60;
+        ctx.strokeStyle = `rgba(${burstColor},${a})`;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(screenX, y - elapsed * 40, r, 0, Math.PI * 2);
+        ctx.stroke();
+        // Inner sparkle for extra punch
+        ctx.fillStyle = `rgba(${burstColor},${a * 0.5})`;
+        ctx.beginPath();
+        ctx.arc(screenX, y - elapsed * 40, 3 + (1 - a) * 4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    } else if (coin.missed) {
+      ctx.fillStyle = 'rgba(120,60,80,0.25)';
+      ctx.beginPath(); ctx.arc(screenX, y, 5, 0, Math.PI * 2); ctx.fill();
+    } else {
+      const glow = ctx.createRadialGradient(screenX, y, 2, screenX, y, 22);
+      glow.addColorStop(0, 'rgba(255,215,0,0.6)');
+      glow.addColorStop(1, 'rgba(255,215,0,0)');
+      ctx.fillStyle = glow;
+      ctx.beginPath(); ctx.arc(screenX, y, 22, 0, Math.PI * 2); ctx.fill();
+      const pulse = 1 + 0.08 * Math.sin(currentSongTime * 6 + coin.time);
+      ctx.fillStyle = '#ffd700';
+      ctx.beginPath(); ctx.arc(screenX, y, 9 * pulse, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#fff5a0';
+      ctx.beginPath(); ctx.arc(screenX - 3, y - 3, 3.5, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+
+  for (const f of jumpFlashes) {
+    const a = f.life / f.maxLife;
+    const r = (1 - a) * 30 + 8;
+    ctx.strokeStyle = `rgba(${f.color},${a * 0.7})`;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(f.x, f.y + 8, r, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  // Ship rendering, mode-aware
+  if (currentMode === 'watchtwin') {
+    drawShip(SHIP_X, twinShip.y, !twinShip.onGround, twinShip.tilt, 'twin', 1.0);
+  } else if (currentMode === 'practice' || currentMode === 'train') {
+    drawShip(SHIP_X, ship.y, !ship.onGround, ship.tilt, 'player', 1.0);
+  } else {
+    // Idle / menu — show the player ship at rest as a preview
+    drawShip(SHIP_X, ship.y, false, 0, 'player', 1.0);
+  }
+
+  // Level badge top-right during play
+  if (isPlaying) {
+    const lvl = twinData.playerLevel || 1;
+    ctx.save();
+    ctx.font = 'bold 12px sans-serif';
+    const txt = `LEVEL ${lvl}`;
+    const m = ctx.measureText(txt);
+    const boxW = m.width + 24;
+    const boxH = 22;
+    const x0 = W - boxW - 14;
+    const y0 = 16;
+    ctx.fillStyle = 'rgba(40,15,25,0.65)';
+    ctx.fillRect(x0, y0, boxW, boxH);
+    ctx.strokeStyle = 'rgba(240,160,200,0.55)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x0, y0, boxW, boxH);
+    ctx.fillStyle = '#ffd0e0';
+    ctx.textAlign = 'center';
+    ctx.fillText(txt, x0 + boxW / 2, y0 + 15);
+    ctx.textAlign = 'left';
+    ctx.restore();
+  }
+
+  // FINAL STRETCH cue — fades in over the last ~15% of the song, pulses gently
+  if (isPlaying && tProgress > 0.85) {
+    const fade = Math.min(1, (tProgress - 0.85) / 0.05);
+    const pulse = 0.82 + 0.18 * Math.sin(currentSongTime * 4);
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 12px sans-serif';
+    const txt = 'FINAL STRETCH';
+    const m = ctx.measureText(txt);
+    const boxW = m.width + 24;
+    const boxH = 22;
+    const x0 = W / 2 - boxW / 2;
+    const y0 = 16;
+    ctx.fillStyle = `rgba(40,10,15,${0.65 * fade})`;
+    ctx.fillRect(x0, y0, boxW, boxH);
+    ctx.strokeStyle = `rgba(255,140,90,${0.6 * fade})`;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x0, y0, boxW, boxH);
+    ctx.fillStyle = `rgba(255,180,120,${fade * pulse})`;
+    ctx.fillText(txt, W / 2, y0 + 15);
+    ctx.restore();
+  }
+
+  // Pause overlay (drawn last so it sits above everything except the menu/countdown)
+  if (isPaused && isPlaying) {
+    ctx.fillStyle = 'rgba(0,0,0,0.65)';
+    ctx.fillRect(0, 0, W, H);
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#f0a0c0';
+    ctx.font = 'bold 48px sans-serif';
+    ctx.fillText('⏸ PAUSED', W / 2, H / 2 - 6);
+    ctx.font = '13px sans-serif';
+    ctx.fillStyle = '#aaa';
+    ctx.fillText('Press P or click ▶ to resume', W / 2, H / 2 + 26);
+    ctx.textAlign = 'left';
+  }
+
+  // Overlays
+  if (isPlaying && currentSongTime < 0) {
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.fillRect(W/2 - 110, H/2 - 40, 220, 80);
+    ctx.fillStyle = '#f0a0c0';
+    ctx.font = 'bold 48px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(Math.ceil(-currentSongTime).toString(), W/2, H/2 + 18);
+    ctx.font = 'bold 12px sans-serif';
+    ctx.fillStyle = '#fff';
+    ctx.fillText('GET READY', W/2, H/2 - 18);
+    ctx.textAlign = 'left';
+  } else if (!isPlaying) {
+    const sh = (twinData.scoreHistory || []).filter(s => s.twinScoreSim != null);
+    const hasProgress = sh.length > 0;
+    const lvl = twinData.playerLevel || 1;
+    // LEVEL UP! banner above the menu when the previous session triggered a level-up
+    if (leveledUpThisSession) {
+      ctx.save();
+      ctx.textAlign = 'center';
+      ctx.font = 'bold 22px sans-serif';
+      const pulse = 0.85 + 0.15 * Math.sin(currentSongTime * 4);
+      ctx.fillStyle = `rgba(255,210,90,${pulse})`;
+      ctx.fillText(`★ LEVEL UP ! · NOW LEVEL ${lvl} · ${getCoinsPerGap(lvl)} COINS PER GAP ★`, W / 2, H / 2 - 130);
+      ctx.textAlign = 'left';
+      ctx.restore();
+    }
+    const boxH = hasProgress ? 230 : 180;
+    const boxTop = H/2 - boxH/2;
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(W/2 - 240, boxTop, 480, boxH);
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#f0a0c0';
+    ctx.font = 'bold 18px sans-serif';
+    ctx.fillText('CHOOSE A MODE TO START', W/2, boxTop + 30);
+    ctx.font = '13px sans-serif';
+    ctx.fillStyle = '#c0e0b0';
+    ctx.fillText('▶ PRACTICE — get comfortable with the controls', W/2, boxTop + 60);
+    ctx.fillStyle = '#ffb0a0';
+    ctx.fillText('● TRAIN — your taps teach your digital twin', W/2, boxTop + 84);
+    ctx.fillStyle = '#a0d0ff';
+    if (twinData.sessions === 0) {
+      ctx.fillText('▷ WATCH TWIN — (unlocks after one TRAIN session)', W/2, boxTop + 108);
+    } else {
+      ctx.fillText(`▷ WATCH TWIN — replay the twin (${twinData.sessions} session${twinData.sessions === 1 ? '' : 's'} trained)`, W/2, boxTop + 108);
+    }
+    if (hasProgress) {
+      const last = sh[sh.length - 1];
+      const best = Math.max(...sh.map(s => s.twinScoreSim));
+      const total = last.totalCoins || 74;
+      const delta = sh.length > 1 ? last.twinScoreSim - sh[sh.length - 2].twinScoreSim : null;
+      const deltaStr = delta == null ? '' : (delta > 0 ? `  ▲ +${delta}` : delta < 0 ? `  ▼ ${delta}` : '  · =');
+      ctx.fillStyle = '#80d0ff';
+      ctx.font = 'bold 13px sans-serif';
+      ctx.fillText(`TWIN PROGRESS · last sim ${last.twinScoreSim}/${total}${deltaStr} · best ${best}/${total}`, W/2, boxTop + 144);
+      ctx.fillStyle = '#a0d0ff';
+      ctx.font = '18px monospace';
+      const spark = buildSparkline(sh.map(s => s.twinScoreSim), total);
+      ctx.fillText(spark, W/2, boxTop + 172);
+      ctx.fillStyle = '#666';
+      ctx.font = '10px sans-serif';
+      ctx.fillText(`recent ${Math.min(12, sh.length)} sessions · higher bar = better twin`, W/2, boxTop + 192);
+    } else {
+      ctx.fillStyle = '#888';
+      ctx.font = '11px sans-serif';
+      ctx.fillText('Tap SPACE on each pillar — tap again mid-air to climb higher', W/2, boxTop + 140);
+    }
+    ctx.textAlign = 'left';
+  }
+}
+
+function drawShip(x, y, flying, tilt, scheme, alphaOverride) {
+  const cs = scheme === 'twin' ? {
+    body: '#a0e0ff', shadow: '#5090b0', cockpitA: '#e0f8ff', cockpitB: '#3080a0',
+    wing: '#60c0f0', flame1: '#a0e0ff', flame2: '#40a0e0', alpha: 0.85,
+  } : {
+    body: '#e8e8f0', shadow: '#b0b0c0', cockpitA: '#a0d0ff', cockpitB: '#3060c0',
+    wing: '#f0a0c0', flame1: '#ffffaa', flame2: '#ffaa40', alpha: 1.0,
+  };
+  ctx.save();
+  ctx.globalAlpha = (alphaOverride !== undefined) ? alphaOverride : cs.alpha;
+  ctx.translate(x, y);
+  ctx.rotate(tilt);
+
+  if (flying) {
+    const flameLen = 10 + Math.random() * 10;
+    const flameGrad = ctx.createLinearGradient(0, 8, 0, 8 + flameLen);
+    flameGrad.addColorStop(0, cs.flame1);
+    flameGrad.addColorStop(0.5, cs.flame2);
+    flameGrad.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = flameGrad;
+    ctx.beginPath();
+    ctx.moveTo(-7, 8); ctx.lineTo(0, 8 + flameLen); ctx.lineTo(7, 8);
+    ctx.closePath(); ctx.fill();
+  }
+
+  ctx.fillStyle = cs.body;
+  ctx.beginPath();
+  ctx.moveTo(-18, 8); ctx.lineTo(-12, -4); ctx.lineTo(0, -10);
+  ctx.lineTo(12, -4); ctx.lineTo(18, 8);
+  ctx.closePath(); ctx.fill();
+
+  ctx.fillStyle = cs.shadow;
+  ctx.beginPath();
+  ctx.moveTo(-18, 8); ctx.lineTo(-12, -4); ctx.lineTo(0, 8);
+  ctx.closePath(); ctx.fill();
+
+  const cockpitGrad = ctx.createRadialGradient(-2, -5, 1, 0, -3, 6);
+  cockpitGrad.addColorStop(0, cs.cockpitA);
+  cockpitGrad.addColorStop(1, cs.cockpitB);
+  ctx.fillStyle = cockpitGrad;
+  ctx.beginPath(); ctx.arc(0, -3, 5, 0, Math.PI * 2); ctx.fill();
+
+  ctx.fillStyle = cs.wing;
+  ctx.beginPath();
+  ctx.moveTo(-18, 4); ctx.lineTo(-26, 9); ctx.lineTo(-18, 9);
+  ctx.closePath(); ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(18, 4); ctx.lineTo(26, 9); ctx.lineTo(18, 9);
+  ctx.closePath(); ctx.fill();
+
+  ctx.restore();
+}
+
+// ============ LOOP ============
+function tick() {
+  const now = performance.now();
+  const dt = Math.min(0.05, (now - lastFrameTime) / 1000);
+  lastFrameTime = now;
+
+  if (!isPaused) {
+    if (isPlaying && audioCtx) {
+      currentSongTime = audioCtx.currentTime - songStartTime;
+    } else {
+      currentSongTime += dt * 0.4;
+    }
+    update(dt);
+  }
+  draw();
+  document.getElementById('score').textContent = 'YOU ' + score;
+  document.getElementById('twinScore').textContent = 'TWIN ' + twinScore;
+  requestAnimationFrame(tick);
+}
+
+// ============ UI ============
+document.getElementById('btnPractice').addEventListener('click', () => startGame('practice'));
+document.getElementById('btnTrain').addEventListener('click', () => startGame('train'));
+document.getElementById('btnWatchTwin').addEventListener('click', () => {
+  if (twinData.sessions === 0) return;
+  startGame('watchtwin');
+});
+
+document.getElementById('btnPause').addEventListener('click', togglePause);
+document.getElementById('btnFullscreen').addEventListener('click', toggleFullscreen);
+
+document.getElementById('nameInput').addEventListener('input', e => {
+  const v = e.target.value;
+  document.getElementById('twinPreview').textContent = v.trim() ? `your twin will be: ${twinNameFor(v)}` : '';
+});
+document.getElementById('nameSubmit').addEventListener('click', () => {
+  commitName(document.getElementById('nameInput').value);
+});
+document.getElementById('nameSkip').addEventListener('click', () => {
+  commitName('');
+});
+document.getElementById('nameInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') commitName(document.getElementById('nameInput').value);
+});
+
+document.getElementById('resetTwin').addEventListener('click', () => {
+  if (confirm('Reset your digital twin? All learned data and your level will be erased.')) {
+    twinData = { sessions: 0, observations: [], scoreHistory: [], playerLevel: 1 };
+    saveTwinData();
+    refreshTwinStatus();
+    setModeBadge();
+  }
+});
+
+const gravitySlider = document.getElementById('gravity');
+const gravityVal = document.getElementById('gravityVal');
+gravitySlider.addEventListener('input', e => {
+  gravityMult = parseFloat(e.target.value);
+  gravityVal.textContent = gravityMult.toFixed(2);
+});
+
+window.addEventListener('keydown', e => {
+  if (e.code === 'Space' || e.key === ' ' || e.code === 'ArrowUp') {
+    e.preventDefault();
+    if (!e.repeat) tryJump();
+  } else if (e.code === 'KeyP' || e.key === 'p' || e.key === 'P') {
+    e.preventDefault();
+    if (!e.repeat) togglePause();
+  } else if (e.code === 'KeyF' || e.key === 'f' || e.key === 'F') {
+    e.preventDefault();
+    if (!e.repeat) toggleFullscreen();
+  }
+});
+canvas.addEventListener('mousedown', e => { e.preventDefault(); tryJump(); });
+canvas.addEventListener('touchstart', e => { e.preventDefault(); tryJump(); }, { passive: false });
+
+window.addEventListener('beforeunload', () => {
+  if (isPlaying && currentMode === 'train' && !sessionSavedThisPlay && currentPlayObservations.length > 0) {
+    saveSession();
+  }
+});
+
+initStars();
+refreshTwinStatus();
+setScoreVisibility();
+refreshIdentity();
+// Show the name modal on first visit (no name AND no prior dismissal recorded)
+if (!localStorage.getItem(NAME_KEY) && localStorage.getItem(NAME_KEY) !== '') {
+  showNameModal();
+}
+tick();
+</script>
+</body>
+</html>

@@ -1,0 +1,903 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Rhythm Runner — with Digital Twin</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 16px;
+    background: #08081a;
+    color: #fff;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-height: 100vh;
+    user-select: none;
+  }
+  h1 {
+    margin: 4px 0 2px;
+    font-weight: 300;
+    letter-spacing: 6px;
+    font-size: 22px;
+    color: #f0a0c0;
+    text-shadow: 0 0 12px rgba(240,160,200,0.5);
+  }
+  .subtitle {
+    color: #888;
+    margin-bottom: 14px;
+    font-size: 12px;
+    letter-spacing: 2px;
+  }
+  canvas {
+    border: 1px solid #2a1a3a;
+    border-radius: 4px;
+    display: block;
+    box-shadow: 0 0 40px rgba(240,160,200,0.15);
+    outline: none;
+  }
+  #ui {
+    display: flex;
+    gap: 24px;
+    align-items: center;
+    margin: 14px 0 4px;
+    padding: 14px 22px;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid #2a1a3a;
+    border-radius: 8px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  button {
+    background: linear-gradient(180deg, #ffb0d0, #e090b0);
+    color: #1a0a2a;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 4px;
+    font-weight: 700;
+    cursor: pointer;
+    font-size: 13px;
+    letter-spacing: 1px;
+    transition: transform 0.1s;
+  }
+  button:hover { transform: scale(1.04); }
+  button:active { transform: scale(0.97); }
+  button.secondary {
+    background: linear-gradient(180deg, #6090b0, #406080);
+    color: #fff;
+    font-size: 11px;
+    padding: 8px 14px;
+  }
+  .control {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    font-size: 11px;
+    color: #aaa;
+    letter-spacing: 1px;
+  }
+  .control label { display: flex; gap: 8px; align-items: center; }
+  .value { color: #f0a0c0; font-weight: 700; min-width: 32px; display: inline-block; }
+  input[type="range"] {
+    width: 160px;
+    accent-color: #f0a0c0;
+  }
+  .scores {
+    display: flex;
+    gap: 18px;
+    align-items: center;
+  }
+  #score, #twinScore {
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: 2px;
+  }
+  #score {
+    color: #ffd700;
+    text-shadow: 0 0 12px rgba(255,215,0,0.45);
+  }
+  #twinScore {
+    color: #80d0ff;
+    text-shadow: 0 0 12px rgba(128,208,255,0.45);
+  }
+  .hint {
+    color: #666;
+    font-size: 11px;
+    margin-top: 10px;
+    letter-spacing: 1px;
+    text-align: center;
+    line-height: 1.7;
+  }
+  #twinStatus { color: #80d0ff; }
+  kbd {
+    background: #2a1a3a;
+    border: 1px solid #4a2a5a;
+    border-bottom-width: 2px;
+    border-radius: 3px;
+    padding: 1px 6px;
+    color: #f0a0c0;
+    font-family: inherit;
+    font-size: 10px;
+  }
+</style>
+</head>
+<body>
+<h1>RHYTHM RUNNER</h1>
+<div class="subtitle">DIGITAL TWIN — LEARNS YOUR PLAY STYLE</div>
+
+<canvas id="game" width="960" height="520" tabindex="0"></canvas>
+
+<div id="ui">
+  <button id="play">▶ PLAY</button>
+  <div class="control">
+    <label>GRAVITY <span class="value" id="gravityVal">1.00</span></label>
+    <input type="range" id="gravity" min="0.3" max="2.5" step="0.05" value="1">
+  </div>
+  <div class="scores">
+    <div id="score">YOU 0</div>
+    <div id="twinScore">TWIN 0</div>
+  </div>
+  <button id="exportData" class="secondary" style="background: linear-gradient(180deg, #80c060, #608040);">EXPORT DATA</button>
+  <button id="resetTwin" class="secondary">RESET TWIN</button>
+</div>
+<div class="hint">
+  <kbd>SPACE</kbd> TO JUMP — TAP MULTIPLE TIMES MID-AIR FOR HIGHER COINS &nbsp;•&nbsp; LONGER GAPS = HIGHER COINS &nbsp;•&nbsp;
+  <span id="twinStatus">TWIN: NOT YET TRAINED</span>
+</div>
+
+<script>
+// ============ AUDIO ============
+let audioCtx = null;
+function initAudio() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+}
+function playTone(freq, dur, startTime, type='triangle', vol=0.15) {
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = type;
+  osc.frequency.value = freq;
+  osc.connect(gain); gain.connect(audioCtx.destination);
+  gain.gain.setValueAtTime(0, startTime);
+  gain.gain.linearRampToValueAtTime(vol, startTime + 0.008);
+  gain.gain.exponentialRampToValueAtTime(0.0008, startTime + dur);
+  osc.start(startTime); osc.stop(startTime + dur + 0.02);
+}
+function playKick(startTime, vol=0.55) {
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(160, startTime);
+  osc.frequency.exponentialRampToValueAtTime(38, startTime + 0.12);
+  gain.gain.setValueAtTime(vol, startTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.2);
+  osc.connect(gain); gain.connect(audioCtx.destination);
+  osc.start(startTime); osc.stop(startTime + 0.22);
+}
+function playHat(startTime, vol=0.06) {
+  const bufSize = Math.floor(audioCtx.sampleRate * 0.05);
+  const buf = audioCtx.createBuffer(1, bufSize, audioCtx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < bufSize; i++) data[i] = (Math.random()*2-1) * (1 - i/bufSize);
+  const src = audioCtx.createBufferSource();
+  src.buffer = buf;
+  const filter = audioCtx.createBiquadFilter();
+  filter.type = 'highpass'; filter.frequency.value = 7000;
+  const gain = audioCtx.createGain(); gain.gain.value = vol;
+  src.connect(filter).connect(gain).connect(audioCtx.destination);
+  src.start(startTime);
+}
+function playCoinSound(freqBase=988) {
+  if (!audioCtx) return;
+  const t = audioCtx.currentTime;
+  playTone(freqBase, 0.12, t, 'sine', 0.1);
+  playTone(freqBase * 1.33, 0.15, t + 0.05, 'sine', 0.08);
+}
+function playJumpSound(forTwin=false) {
+  if (!audioCtx) return;
+  const t = audioCtx.currentTime;
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = 'square';
+  const baseFreq = forTwin ? 220 : 280;
+  osc.frequency.setValueAtTime(baseFreq, t);
+  osc.frequency.exponentialRampToValueAtTime(baseFreq * 2, t + 0.08);
+  gain.gain.setValueAtTime(forTwin ? 0.025 : 0.05, t);
+  gain.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
+  osc.connect(gain).connect(audioCtx.destination);
+  osc.start(t); osc.stop(t + 0.14);
+}
+
+// ============ SONG ============
+const BPM = 100;
+const BEAT_DUR = 60 / BPM;
+// Mixed-gap song: each beat-pair has a different spacing for musical variety.
+// Each tap auto-computes the launch velocity needed to land on the next pillar,
+// so all gaps are playable from the same gravity setting.
+const GAPS = [2, 3, 2, 3, 4, 2, 3, 4, 2, 3, 2, 4, 3, 2, 3, 4, 2, 3, 4, 2, 3, 4, 2, 3];
+const SCALE = [220, 246.94, 261.63, 293.66, 329.63, 392, 440, 523.25, 587.33];
+const MELODY = [0, 2, 4, 5, 7, 4, 2, 0];
+
+function buildEmphasisTimesPerLoop() {
+  const times = [0]; let t = 0;
+  for (const g of GAPS) { t += g * BEAT_DUR; times.push(t); }
+  return times;
+}
+const PER_LOOP = buildEmphasisTimesPerLoop();
+const LOOP_DUR = PER_LOOP[PER_LOOP.length - 1] + BEAT_DUR;
+const TOTAL_LOOPS = 3;
+let emphasisTimes = [];
+
+function scheduleSong(startTime) {
+  emphasisTimes = [];
+  for (let loop = 0; loop < TOTAL_LOOPS; loop++) {
+    const loopOffset = loop * LOOP_DUR;
+    const totalBeats = Math.ceil(LOOP_DUR / BEAT_DUR);
+    for (let b = 0; b < totalBeats; b++) {
+      const t = startTime + loopOffset + b * BEAT_DUR;
+      playKick(t); playHat(t + BEAT_DUR / 2);
+    }
+    for (let i = 0; i < PER_LOOP.length; i++) {
+      const t = startTime + loopOffset + PER_LOOP[i];
+      const note = SCALE[MELODY[i % MELODY.length] % SCALE.length];
+      playTone(note, 0.35, t, 'square', 0.12);
+      playTone(note / 2, 0.6, t, 'sawtooth', 0.07);
+      emphasisTimes.push(loopOffset + PER_LOOP[i]);
+    }
+  }
+}
+
+// ============ DIGITAL TWIN STORE ============
+// Observation = { gapBeats, taps: [normalized 0..1], gravity }
+const TWIN_KEY = 'rhythm-runner-twin-v2';
+function loadTwinData() {
+  try {
+    const raw = localStorage.getItem(TWIN_KEY);
+    if (raw) {
+      const d = JSON.parse(raw);
+      return {
+        sessions: d.sessions || 0,
+        observations: d.observations || [],
+        scoreHistory: d.scoreHistory || [],
+      };
+    }
+  } catch (e) {}
+  return { sessions: 0, observations: [], scoreHistory: [] };
+}
+function saveTwinData() {
+  try { localStorage.setItem(TWIN_KEY, JSON.stringify(twinData)); } catch (e) {}
+}
+let twinData = loadTwinData();
+
+function refreshTwinStatus() {
+  const el = document.getElementById('twinStatus');
+  if (twinData.sessions === 0 && twinData.observations.length === 0) {
+    el.textContent = 'TWIN: NOT YET TRAINED — PLAY ONCE TO TEACH IT';
+  } else {
+    el.textContent = `TWIN: TRAINED ON ${twinData.sessions} SESSION${twinData.sessions === 1 ? '' : 'S'} (${twinData.observations.length} OBSERVATIONS)`;
+  }
+}
+
+// ============ GAME ============
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const W = canvas.width;
+const H = canvas.height;
+const GROUND_Y = H - 90;
+const SHIP_X = 220;
+
+// Multi-tap (continuous-jump) version. Each SPACE press adds a fixed upward
+// impulse (Flappy-Bird style). Multiple taps mid-air stack up to a velocity cap,
+// letting the player climb to coins placed higher up. Longer beat gaps put
+// coins higher (quadratic scaling), so the player naturally taps more times
+// during longer gaps and fewer times during short ones.
+const BASE_GRAVITY = 1100;
+const SCROLL_SPEED = 230;
+const JUMP_IMPULSE = 380;        // px/s of upward velocity added per tap
+const MAX_UP_VELOCITY = 620;     // cap on stacked impulses
+const REF_GRAVITY_FOR_COINS = 1100 / 8;  // for placing coins from gap length
+
+let gravityMult = 1.0;
+let score = 0;
+let twinScore = 0;
+let isPlaying = false;
+let songStartTime = 0;
+let currentSongTime = 0;
+let coins = [];
+let stars = [];
+let dust = [];
+let jumpFlashes = [];
+let twinDust = [];
+
+const ship = { y: GROUND_Y, vy: 0, onGround: true, tilt: 0 };
+const twinShip = { y: GROUND_Y, vy: 0, onGround: true, tilt: 0 };
+
+// Current play's recording
+let currentPlayObservations = [];   // segments completed this play
+let segmentTaps = [];                // tap normalized times in current segment
+let currentSegmentIdx = -1;
+let sessionSavedThisPlay = false;
+
+// Twin's scheduled taps (sampled from history at game start)
+let twinTapSchedule = [];
+
+function initStars() {
+  stars = [];
+  for (let i = 0; i < 110; i++) {
+    stars.push({
+      x: Math.random() * W * 5,
+      y: Math.random() * (GROUND_Y - 60),
+      size: Math.random() * 1.6 + 0.3,
+      twinkle: Math.random() * Math.PI * 2,
+      depth: Math.random() * 0.3 + 0.05,
+    });
+  }
+}
+
+function planTwinSchedule() {
+  twinTapSchedule = [];
+  if (twinData.observations.length === 0) return;
+  for (let i = 0; i < emphasisTimes.length - 1; i++) {
+    const t1 = emphasisTimes[i];
+    const t2 = emphasisTimes[i + 1];
+    const gapBeats = Math.round((t2 - t1) / BEAT_DUR);
+    // candidates with same gap; fallback to closest gap
+    let candidates = twinData.observations.filter(o => o.gapBeats === gapBeats);
+    if (candidates.length === 0) {
+      let bestDiff = Infinity;
+      for (const o of twinData.observations) {
+        const d = Math.abs(o.gapBeats - gapBeats);
+        if (d < bestDiff) bestDiff = d;
+      }
+      candidates = twinData.observations.filter(o => Math.abs(o.gapBeats - gapBeats) === bestDiff);
+    }
+    if (candidates.length === 0) continue;
+    const chosen = candidates[Math.floor(Math.random() * candidates.length)];
+    for (const norm of chosen.taps) {
+      twinTapSchedule.push(t1 + norm * (t2 - t1));
+    }
+  }
+  twinTapSchedule.sort((a, b) => a - b);
+}
+
+function startGame() {
+  initAudio();
+  score = 0; twinScore = 0;
+  coins = []; dust = []; twinDust = []; jumpFlashes = [];
+  ship.y = GROUND_Y; ship.vy = 0; ship.onGround = true; ship.tilt = 0;
+  twinShip.y = GROUND_Y; twinShip.vy = 0; twinShip.onGround = true; twinShip.tilt = 0;
+  currentPlayObservations = [];
+  segmentTaps = [];
+  currentSegmentIdx = -1;
+  sessionSavedThisPlay = false;
+
+  const launchAt = audioCtx.currentTime + 1.5;
+  scheduleSong(launchAt);
+  songStartTime = launchAt;
+
+  for (let i = 0; i < emphasisTimes.length - 1; i++) {
+    const t1 = emphasisTimes[i];
+    const t2 = emphasisTimes[i + 1];
+    const gap = t2 - t1;
+    coins.push({
+      time: (t1 + t2) / 2,
+      gapSec: gap,
+      // Longer gap → higher coin (quadratic). Player taps SPACE more times
+      // mid-air to climb to higher coins.
+      height: REF_GRAVITY_FOR_COINS * gap * gap,
+      collected: false,
+      twinCollected: false,
+      missed: false,
+    });
+  }
+
+  planTwinSchedule();
+  isPlaying = true;
+  canvas.focus();
+}
+
+function tryJump() {
+  if (!isPlaying) return;
+  // Multi-tap: each tap adds upward impulse (capped). Works on ground or in air.
+  ship.vy = Math.max(ship.vy - JUMP_IMPULSE, -MAX_UP_VELOCITY);
+  ship.onGround = false;
+  jumpFlashes.push({ x: SHIP_X, y: ship.y, life: 0.25, maxLife: 0.25, color: '255,220,255' });
+  playJumpSound(false);
+  recordPlayerTap();
+}
+
+function recordPlayerTap() {
+  if (currentSongTime < 0) return;
+  // find current segment
+  let segIdx = -1;
+  for (let i = 0; i < emphasisTimes.length - 1; i++) {
+    if (currentSongTime >= emphasisTimes[i] && currentSongTime < emphasisTimes[i+1]) {
+      segIdx = i; break;
+    }
+  }
+  if (segIdx >= 0) {
+    const t1 = emphasisTimes[segIdx];
+    const t2 = emphasisTimes[segIdx + 1];
+    const norm = (currentSongTime - t1) / (t2 - t1);
+    segmentTaps.push(Math.max(0, Math.min(1, norm)));
+  }
+}
+
+function finalizeCurrentSegment() {
+  if (currentSegmentIdx < 0 || currentSegmentIdx >= emphasisTimes.length - 1) return;
+  const t1 = emphasisTimes[currentSegmentIdx];
+  const t2 = emphasisTimes[currentSegmentIdx + 1];
+  const gapBeats = Math.round((t2 - t1) / BEAT_DUR);
+  currentPlayObservations.push({
+    gapBeats,
+    taps: [...segmentTaps],
+    gravity: gravityMult,
+  });
+  segmentTaps = [];
+}
+
+function checkSegmentCrossing() {
+  let segIdx = -1;
+  for (let i = 0; i < emphasisTimes.length - 1; i++) {
+    if (currentSongTime >= emphasisTimes[i] && currentSongTime < emphasisTimes[i+1]) {
+      segIdx = i; break;
+    }
+  }
+  if (segIdx !== currentSegmentIdx) {
+    if (currentSegmentIdx >= 0) finalizeCurrentSegment();
+    currentSegmentIdx = segIdx;
+  }
+}
+
+function saveSession() {
+  if (sessionSavedThisPlay) return;
+  if (currentSegmentIdx >= 0) finalizeCurrentSegment();
+  if (currentPlayObservations.length > 0) {
+    for (const obs of currentPlayObservations) twinData.observations.push(obs);
+    twinData.sessions++;
+    // Record per-session scores so we can plot the real learning curve later.
+    if (!twinData.scoreHistory) twinData.scoreHistory = [];
+    twinData.scoreHistory.push({
+      session: twinData.sessions,
+      playerScore: score,
+      twinScore: twinScore,
+      observationCount: currentPlayObservations.length,
+      timestamp: new Date().toISOString(),
+    });
+    if (twinData.observations.length > 3000) {
+      twinData.observations = twinData.observations.slice(-3000);
+    }
+    saveTwinData();
+    refreshTwinStatus();
+  }
+  sessionSavedThisPlay = true;
+}
+
+function exportTwinData() {
+  const data = JSON.stringify(twinData, null, 2);
+  const blob = new Blob([data], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `rhythm-twin-data-${new Date().toISOString().slice(0,10)}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function spawnDust(arr, x, y, color='255,200,230') {
+  for (let i = 0; i < 10; i++) {
+    arr.push({
+      x, y, color,
+      vx: (Math.random() - 0.5) * 100 - 30,
+      vy: -Math.random() * 80 - 20,
+      life: 0.55 + Math.random() * 0.2,
+      maxLife: 0.7,
+    });
+  }
+}
+
+function updatePhysics(s, dt, g) {
+  s.vy += g * dt;
+  s.y += s.vy * dt;
+  if (s.y >= GROUND_Y) {
+    const wasFlying = !s.onGround;
+    s.y = GROUND_Y; s.vy = 0; s.onGround = true;
+    return wasFlying;
+  }
+  s.tilt = Math.max(-0.5, Math.min(0.5, s.vy / 900));
+  return false;
+}
+
+let lastFrameTime = performance.now();
+
+function update(dt) {
+  if (!isPlaying || !audioCtx) return;
+  currentSongTime = audioCtx.currentTime - songStartTime;
+
+  // segment crossing
+  checkSegmentCrossing();
+
+  // physics for player
+  const g = BASE_GRAVITY * gravityMult;
+  const playerLanded = updatePhysics(ship, dt, g);
+  if (playerLanded && Math.abs(ship.vy) > 0) spawnDust(dust, SHIP_X, GROUND_Y);
+  ship.tilt = Math.max(-0.5, Math.min(0.5, ship.vy / 900));
+
+  // physics for twin (same gravity)
+  const twinLanded = updatePhysics(twinShip, dt, g);
+  if (twinLanded) spawnDust(twinDust, SHIP_X, GROUND_Y, '128,208,255');
+  twinShip.tilt = Math.max(-0.5, Math.min(0.5, twinShip.vy / 900));
+
+  // execute twin scheduled taps (multi-tap: each tap adds impulse, capped)
+  while (twinTapSchedule.length > 0 && twinTapSchedule[0] <= currentSongTime) {
+    twinTapSchedule.shift();
+    twinShip.vy = Math.max(twinShip.vy - JUMP_IMPULSE, -MAX_UP_VELOCITY);
+    twinShip.onGround = false;
+    jumpFlashes.push({ x: SHIP_X, y: twinShip.y, life: 0.25, maxLife: 0.25, color: '128,208,255' });
+    playJumpSound(true);
+  }
+
+  // coin collection (player + twin independently)
+  for (const coin of coins) {
+    const screenX = SHIP_X + SCROLL_SPEED * (coin.time - currentSongTime);
+    const coinY = GROUND_Y - coin.height;
+    const dx = screenX - SHIP_X;
+    if (!coin.collected && dx > -22 && dx < 22 && Math.abs(coinY - ship.y) < 24) {
+      coin.collected = true;
+      coin.collectedAt = currentSongTime;
+      score++;
+      playCoinSound(988);
+    }
+    if (!coin.twinCollected && dx > -22 && dx < 22 && Math.abs(coinY - twinShip.y) < 24) {
+      coin.twinCollected = true;
+      coin.twinCollectedAt = currentSongTime;
+      twinScore++;
+      playCoinSound(740);
+    }
+    if (!coin.collected && screenX < SHIP_X - 30) coin.missed = true;
+  }
+
+  // particles
+  for (const arr of [dust, twinDust]) {
+    for (const d of arr) {
+      d.x += d.vx * dt; d.y += d.vy * dt;
+      d.vy += 240 * dt; d.life -= dt;
+    }
+  }
+  dust = dust.filter(d => d.life > 0);
+  twinDust = twinDust.filter(d => d.life > 0);
+  for (const f of jumpFlashes) f.life -= dt;
+  jumpFlashes = jumpFlashes.filter(f => f.life > 0);
+
+  // detect end of song
+  const lastT = emphasisTimes[emphasisTimes.length - 1];
+  if (currentSongTime > lastT + 2 && !sessionSavedThisPlay) {
+    saveSession();
+  }
+}
+
+// ============ RENDER ============
+function draw() {
+  const grad = ctx.createLinearGradient(0, 0, 0, GROUND_Y);
+  grad.addColorStop(0, '#0a0420');
+  grad.addColorStop(0.4, '#2a0a3a');
+  grad.addColorStop(0.85, '#5a1a4a');
+  grad.addColorStop(1, '#7a3a4a');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, GROUND_Y);
+
+  const scrollX = SCROLL_SPEED * Math.max(0, currentSongTime);
+
+  for (const star of stars) {
+    const wx = star.x - scrollX * star.depth;
+    const x = ((wx % (W * 1.5)) + W * 1.5) % (W * 1.5);
+    if (x > W + 2) continue;
+    const alpha = 0.35 + 0.45 * Math.sin(currentSongTime * 1.5 + star.twinkle);
+    ctx.fillStyle = `rgba(255,240,255,${alpha})`;
+    ctx.fillRect(x, star.y, star.size, star.size);
+  }
+
+  const planetX = ((-scrollX * 0.04 + 700) % (W * 2) + W * 2) % (W * 2);
+  if (planetX < W + 80) {
+    const planetGrad = ctx.createRadialGradient(planetX - 15, 90, 10, planetX, 100, 60);
+    planetGrad.addColorStop(0, '#ffb0d0');
+    planetGrad.addColorStop(0.7, '#a04070');
+    planetGrad.addColorStop(1, '#401030');
+    ctx.fillStyle = planetGrad;
+    ctx.beginPath();
+    ctx.arc(planetX, 100, 55, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  ctx.fillStyle = '#1a0830';
+  ctx.beginPath(); ctx.moveTo(0, GROUND_Y);
+  for (let x = 0; x <= W; x += 40) {
+    const wx = x + scrollX * 0.25;
+    const y = GROUND_Y - 90 - Math.sin(wx * 0.004) * 35 - Math.sin(wx * 0.011) * 22;
+    ctx.lineTo(x, y);
+  }
+  ctx.lineTo(W, GROUND_Y); ctx.fill();
+
+  ctx.fillStyle = '#0a0418';
+  ctx.beginPath(); ctx.moveTo(0, GROUND_Y);
+  for (let x = 0; x <= W; x += 25) {
+    const wx = x + scrollX * 0.55;
+    const y = GROUND_Y - 55 - Math.sin(wx * 0.008) * 28 - Math.cos(wx * 0.018) * 18;
+    ctx.lineTo(x, y);
+  }
+  ctx.lineTo(W, GROUND_Y); ctx.fill();
+
+  const groundGrad = ctx.createLinearGradient(0, GROUND_Y, 0, H);
+  groundGrad.addColorStop(0, '#1a0828');
+  groundGrad.addColorStop(1, '#000');
+  ctx.fillStyle = groundGrad;
+  ctx.fillRect(0, GROUND_Y, W, H - GROUND_Y);
+
+  ctx.strokeStyle = 'rgba(240,160,200,0.35)'; ctx.lineWidth = 1;
+  const gridSpacing = 50;
+  const gridOffset = scrollX % gridSpacing;
+  for (let i = -gridSpacing; i < W + gridSpacing * 2; i += gridSpacing) {
+    const x = i - gridOffset;
+    ctx.beginPath(); ctx.moveTo(x, GROUND_Y);
+    const dx = (x - W / 2) * 3;
+    ctx.lineTo(x + dx * 0.6, H); ctx.stroke();
+  }
+  for (let i = 1; i < 8; i++) {
+    const ys = GROUND_Y + Math.pow(i, 1.8) * 3.2;
+    if (ys > H) break;
+    ctx.beginPath(); ctx.moveTo(0, ys); ctx.lineTo(W, ys); ctx.stroke();
+  }
+
+  // emphasis markers
+  for (let i = 0; i < emphasisTimes.length; i++) {
+    const t = emphasisTimes[i];
+    const screenX = SHIP_X + SCROLL_SPEED * (t - currentSongTime);
+    if (screenX < -30 || screenX > W + 30) continue;
+    const proximity = Math.max(0, 1 - Math.abs(t - currentSongTime) * 3);
+    ctx.fillStyle = `rgba(255,200,230,${0.3 + 0.7 * proximity})`;
+    ctx.fillRect(screenX - 2, GROUND_Y - 6, 4, 12);
+    if (proximity > 0.4) {
+      ctx.fillStyle = `rgba(255,255,255,${proximity * 0.5})`;
+      ctx.beginPath();
+      ctx.arc(screenX, GROUND_Y, 22 * proximity, 0, Math.PI * 2); ctx.fill();
+      const pillarGrad = ctx.createLinearGradient(screenX, GROUND_Y - 250, screenX, GROUND_Y);
+      pillarGrad.addColorStop(0, 'rgba(255,200,230,0)');
+      pillarGrad.addColorStop(1, `rgba(255,200,230,${proximity * 0.3})`);
+      ctx.fillStyle = pillarGrad;
+      ctx.fillRect(screenX - 1, GROUND_Y - 250, 2, 250);
+    }
+  }
+
+  // dust
+  for (const arr of [dust, twinDust]) {
+    for (const d of arr) {
+      const a = d.life / d.maxLife;
+      ctx.fillStyle = `rgba(${d.color},${a * 0.6})`;
+      ctx.fillRect(d.x - 2, d.y - 2, 3, 3);
+    }
+  }
+
+  // coins (gap-quadratic heights stored at game start)
+  for (const coin of coins) {
+    const screenX = SHIP_X + SCROLL_SPEED * (coin.time - currentSongTime);
+    if (screenX < -30 || screenX > W + 30) continue;
+    const y = GROUND_Y - coin.height;
+
+    if (coin.collected) {
+      const elapsed = currentSongTime - coin.collectedAt;
+      if (elapsed < 0.5) {
+        const a = 1 - elapsed / 0.5;
+        const r = 10 + elapsed * 60;
+        ctx.strokeStyle = `rgba(255,215,0,${a})`;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(screenX, y - elapsed * 40, r, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    } else if (coin.missed) {
+      ctx.fillStyle = 'rgba(120,60,80,0.25)';
+      ctx.beginPath(); ctx.arc(screenX, y, 5, 0, Math.PI * 2); ctx.fill();
+    } else {
+      const glow = ctx.createRadialGradient(screenX, y, 2, screenX, y, 22);
+      glow.addColorStop(0, 'rgba(255,215,0,0.6)');
+      glow.addColorStop(1, 'rgba(255,215,0,0)');
+      ctx.fillStyle = glow;
+      ctx.beginPath(); ctx.arc(screenX, y, 22, 0, Math.PI * 2); ctx.fill();
+      const pulse = 1 + 0.08 * Math.sin(currentSongTime * 6 + coin.time);
+      ctx.fillStyle = '#ffd700';
+      ctx.beginPath(); ctx.arc(screenX, y, 9 * pulse, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#fff5a0';
+      ctx.beginPath(); ctx.arc(screenX - 3, y - 3, 3.5, 0, Math.PI * 2); ctx.fill();
+    }
+
+    // small twin-grabbed indicator
+    if (coin.twinCollected) {
+      const elapsed = currentSongTime - coin.twinCollectedAt;
+      if (elapsed < 0.4) {
+        const a = 1 - elapsed / 0.4;
+        ctx.strokeStyle = `rgba(128,208,255,${a * 0.8})`;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(screenX, y, 13 + elapsed * 30, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    }
+  }
+
+  // jump flashes
+  for (const f of jumpFlashes) {
+    const a = f.life / f.maxLife;
+    const r = (1 - a) * 30 + 8;
+    ctx.strokeStyle = `rgba(${f.color},${a * 0.7})`;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(f.x, f.y + 8, r, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  // twin ship (drawn first, behind player visually via alpha)
+  if (twinData.observations.length > 0 || isPlaying === false) {
+    drawShip(SHIP_X, twinShip.y, !twinShip.onGround, twinShip.tilt, 'twin');
+  }
+  // player ship on top
+  drawShip(SHIP_X, ship.y, !ship.onGround, ship.tilt, 'player');
+
+  // overlays
+  if (isPlaying && currentSongTime < 0) {
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.fillRect(W/2 - 110, H/2 - 40, 220, 80);
+    ctx.fillStyle = '#f0a0c0';
+    ctx.font = 'bold 48px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(Math.ceil(-currentSongTime).toString(), W/2, H/2 + 18);
+    ctx.font = 'bold 12px sans-serif';
+    ctx.fillStyle = '#fff';
+    ctx.fillText('GET READY', W/2, H/2 - 18);
+    ctx.textAlign = 'left';
+  } else if (!isPlaying) {
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.fillRect(W/2 - 200, H/2 - 70, 400, 140);
+    ctx.fillStyle = '#f0a0c0';
+    ctx.font = 'bold 18px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('PRESS ▶ PLAY TO START', W/2, H/2 - 32);
+    ctx.fillStyle = '#aaa';
+    ctx.font = '13px sans-serif';
+    ctx.fillText('Tap SPACE on each pillar — and again mid-air to climb higher', W/2, H/2 - 8);
+    ctx.fillText('Long-gap coins are high: tap many times. Short-gap coins: one tap.', W/2, H/2 + 14);
+    ctx.fillStyle = '#80d0ff';
+    ctx.font = 'italic 12px sans-serif';
+    if (twinData.observations.length > 0) {
+      ctx.fillText(`Your digital twin is ready — trained on ${twinData.sessions} session${twinData.sessions === 1 ? '' : 's'}`, W/2, H/2 + 38);
+    } else {
+      ctx.fillText('Your digital twin will start learning this run', W/2, H/2 + 38);
+    }
+    ctx.textAlign = 'left';
+  }
+}
+
+function drawShip(x, y, flying, tilt, scheme) {
+  const cs = scheme === 'twin' ? {
+    body: '#a0e0ff', shadow: '#5090b0', cockpitA: '#e0f8ff', cockpitB: '#3080a0',
+    wing: '#60c0f0', flame1: '#a0e0ff', flame2: '#40a0e0', alpha: 0.55,
+  } : {
+    body: '#e8e8f0', shadow: '#b0b0c0', cockpitA: '#a0d0ff', cockpitB: '#3060c0',
+    wing: '#f0a0c0', flame1: '#ffffaa', flame2: '#ffaa40', alpha: 1.0,
+  };
+  ctx.save();
+  ctx.globalAlpha = cs.alpha;
+  ctx.translate(x, y);
+  ctx.rotate(tilt);
+
+  if (flying) {
+    const flameLen = 10 + Math.random() * 10;
+    const flameGrad = ctx.createLinearGradient(0, 8, 0, 8 + flameLen);
+    flameGrad.addColorStop(0, cs.flame1);
+    flameGrad.addColorStop(0.5, cs.flame2);
+    flameGrad.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = flameGrad;
+    ctx.beginPath();
+    ctx.moveTo(-7, 8); ctx.lineTo(0, 8 + flameLen); ctx.lineTo(7, 8);
+    ctx.closePath(); ctx.fill();
+  }
+
+  ctx.fillStyle = cs.body;
+  ctx.beginPath();
+  ctx.moveTo(-18, 8); ctx.lineTo(-12, -4); ctx.lineTo(0, -10);
+  ctx.lineTo(12, -4); ctx.lineTo(18, 8);
+  ctx.closePath(); ctx.fill();
+
+  ctx.fillStyle = cs.shadow;
+  ctx.beginPath();
+  ctx.moveTo(-18, 8); ctx.lineTo(-12, -4); ctx.lineTo(0, 8);
+  ctx.closePath(); ctx.fill();
+
+  const cockpitGrad = ctx.createRadialGradient(-2, -5, 1, 0, -3, 6);
+  cockpitGrad.addColorStop(0, cs.cockpitA);
+  cockpitGrad.addColorStop(1, cs.cockpitB);
+  ctx.fillStyle = cockpitGrad;
+  ctx.beginPath(); ctx.arc(0, -3, 5, 0, Math.PI * 2); ctx.fill();
+
+  ctx.fillStyle = cs.wing;
+  ctx.beginPath();
+  ctx.moveTo(-18, 4); ctx.lineTo(-26, 9); ctx.lineTo(-18, 9);
+  ctx.closePath(); ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(18, 4); ctx.lineTo(26, 9); ctx.lineTo(18, 9);
+  ctx.closePath(); ctx.fill();
+
+  ctx.restore();
+}
+
+// ============ LOOP ============
+function tick() {
+  const now = performance.now();
+  const dt = Math.min(0.05, (now - lastFrameTime) / 1000);
+  lastFrameTime = now;
+
+  if (isPlaying && audioCtx) {
+    currentSongTime = audioCtx.currentTime - songStartTime;
+  } else {
+    currentSongTime += dt * 0.4;
+  }
+  update(dt);
+  draw();
+  document.getElementById('score').textContent = 'YOU ' + score;
+  document.getElementById('twinScore').textContent = 'TWIN ' + twinScore;
+  requestAnimationFrame(tick);
+}
+
+// ============ UI ============
+document.getElementById('play').addEventListener('click', () => {
+  // If a session is in progress and not yet saved, save it before restarting
+  if (isPlaying && !sessionSavedThisPlay && currentPlayObservations.length > 0) {
+    saveSession();
+  }
+  startGame();
+  document.getElementById('play').textContent = '↻ RESTART';
+});
+
+document.getElementById('exportData').addEventListener('click', exportTwinData);
+
+document.getElementById('resetTwin').addEventListener('click', () => {
+  if (confirm('Reset your digital twin? All learned data will be erased.')) {
+    twinData = { sessions: 0, observations: [] };
+    saveTwinData();
+    refreshTwinStatus();
+  }
+});
+
+const gravitySlider = document.getElementById('gravity');
+const gravityVal = document.getElementById('gravityVal');
+gravitySlider.addEventListener('input', e => {
+  gravityMult = parseFloat(e.target.value);
+  gravityVal.textContent = gravityMult.toFixed(2);
+});
+
+window.addEventListener('keydown', e => {
+  if (e.code === 'Space' || e.key === ' ' || e.code === 'ArrowUp') {
+    e.preventDefault();
+    if (!e.repeat) tryJump();
+  }
+});
+canvas.addEventListener('mousedown', e => { e.preventDefault(); tryJump(); });
+canvas.addEventListener('touchstart', e => { e.preventDefault(); tryJump(); }, { passive: false });
+
+// Save twin if user closes the tab mid-session
+window.addEventListener('beforeunload', () => {
+  if (isPlaying && !sessionSavedThisPlay && currentPlayObservations.length > 0) {
+    saveSession();
+  }
+});
+
+initStars();
+refreshTwinStatus();
+tick();
+</script>
+</body>
+</html>
