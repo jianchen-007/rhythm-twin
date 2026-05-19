@@ -35,7 +35,7 @@ After 4–6 TRAIN sessions, the twin's sparkline (visible in the start menu) sho
 |---|---|
 | `index_v1_arc-and-coin.html` | The original single-mode build (one PLAY button, twin plays alongside the player) |
 | `index_v2_modes.html` | **Main version** — three modes, level progression, twin self-evaluation sparkline, pause, fullscreen. Data stays in browser localStorage. |
-| `index_v3_online.html` | Deployable build with optional anonymous auto-upload to Supabase. Use this for collecting user-study data. See `DEPLOY.md`. |
+| `index_v3_online.html` | Deployable build with optional anonymous auto-upload to Supabase. Use this for collecting data from multiple players. See `DEPLOY.md`. |
 | `supabase_schema.sql` | Postgres schema + RLS policy for the `v3` backend |
 | `DEPLOY.md` | Step-by-step deploy guide (Supabase + Netlify/Vercel/GitHub Pages, ~20 minutes, $0) |
 
@@ -47,11 +47,11 @@ After 4–6 TRAIN sessions, the twin's sparkline (visible in the start menu) sho
 | P | Pause / resume |
 | F | Toggle fullscreen |
 
-## How the twin works (one paragraph)
+## How the twin works
 
-The game records every SPACE press during a TRAIN session as a per-beat-gap observation: `{gap-length-in-beats, normalized-tap-times, gravity}`. When the twin plays, its planner picks one historical observation per gap (matching the current gap's beat count) and replays those tap times at the same relative position within the new gap. With more training sessions, the twin's run looks more like yours. The mechanism is intentionally simple — the project is a reference implementation for a research paper that argues for the *architectural decomposition* (Sense → Analyze → Model → Act), not the modeling sophistication.
+The game records every SPACE press during a TRAIN session as a per-beat-gap observation: `{gap-length-in-beats, normalized-tap-times, gravity}`. When the twin plays, its planner picks one historical observation per gap (matching the current gap's beat count) and replays those tap times at the same relative position within the new gap. With more training sessions, the twin's run looks more like yours. The mechanism is intentionally simple — the architectural decomposition (Sense → Analyze → Model → Act) is what makes it interesting, not the modeling sophistication.
 
-## Deploying online for user studies
+## Deploying online
 
 `DEPLOY.md` walks through standing up a public link with free Supabase + free static hosting in about 20 minutes. Every TRAIN session auto-uploads with an anonymous UUID and an optional display name; you download the dataset as CSV from the Supabase dashboard.
 
