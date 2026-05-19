@@ -518,12 +518,12 @@ function refreshTwinStatus() {
     if (sims.length > 0) {
       const last = sims[sims.length - 1];
       const best = Math.max(...sims.map(s => s.twinScoreSim));
-      const total = last.totalCoins || 74;
+      const total = last.totalValue || last.totalCoins || 74;
       const delta = sims.length > 1
         ? (last.twinScoreSim - sims[sims.length - 2].twinScoreSim)
         : null;
       const deltaStr = delta == null ? '' : (delta > 0 ? ` (+${delta})` : delta < 0 ? ` (${delta})` : ' (=)');
-      txt += ` · SIM ${last.twinScoreSim}/${total}${deltaStr} · BEST ${best}/${total}`;
+      txt += ` · SIM ${last.twinScoreSim}/${total} pts${deltaStr} · BEST ${best}/${total}`;
       const spark = buildSparkline(sims.map(s => s.twinScoreSim), total);
       if (spark) txt += ` · ${spark}`;
     } else {
@@ -540,6 +540,10 @@ const ctx = canvas.getContext('2d');
 const W = canvas.width;
 const H = canvas.height;
 const GROUND_Y = H - 90;
+// Ceiling — both ships bonk here so neither can fly off the top of the canvas.
+// Needed because tapping at each apex stacks ~66 px per cycle, which over a 4-beat gap
+// could otherwise compound far above the playfield.
+const CEILING_Y = 25;
 const SHIP_X = 220;
 
 const BASE_GRAVITY = 1100;
@@ -571,6 +575,7 @@ let stars = [];
 let dust = [];
 let jumpFlashes = [];
 let twinDust = [];
+let scorePopups = [];  // floating "+N" indicators when a coin is collected
 
 const ship = { y: GROUND_Y, vy: 0, onGround: true, tilt: 0 };
 const twinShip = { y: GROUND_Y, vy: 0, onGround: true, tilt: 0 };
@@ -639,6 +644,7 @@ function simulateTwinScore() {
     }
     vy += g * dt;
     y += vy * dt;
+    if (y < CEILING_Y) { y = CEILING_Y; if (vy < 0) vy = 0; }
     if (y >= GROUND_Y) { y = GROUND_Y; vy = 0; }
     for (let ci = 0; ci < coins.length; ci++) {
       if (collected[ci]) continue;
@@ -648,7 +654,7 @@ function simulateTwinScore() {
       const coinY = GROUND_Y - c.height;
       if (dx > -22 && dx < 22 && Math.abs(coinY - y) < 24) {
         collected[ci] = true;
-        score++;
+        score += (c.value || 1);
       }
     }
   }
@@ -770,7 +776,7 @@ function startGame(mode) {
   currentMode = mode;
   score = 0; twinScore = 0;
   leveledUpThisSession = false;
-  coins = []; dust = []; twinDust = []; jumpFlashes = [];
+  coins = []; dust = []; twinDust = []; jumpFlashes = []; scorePopups = [];
   ship.y = GROUND_Y; ship.vy = 0; ship.onGround = true; ship.tilt = 0;
   twinShip.y = GROUND_Y; twinShip.vy = 0; twinShip.onGround = true; twinShip.tilt = 0;
   currentPlayObservations = [];
@@ -791,15 +797,19 @@ function startGame(mode) {
     const t2 = emphasisTimes[i + 1];
     const gap = t2 - t1;
     const h = REF_GRAVITY_FOR_COINS * gap * gap;
+    const gapBeats = Math.round(gap / BEAT_DUR);
+    // Coin value scales with the height tier: 2-beat=1, 3-beat=2, 4-beat=3
+    // (1-beat loop-stitch artifacts default to 1).
+    const value = Math.max(1, gapBeats - 1);
     for (let j = 1; j <= cpg; j++) {
       const fraction = j / (cpg + 1);  // evenly spaced between t1 and t2
       coins.push({
         time: t1 + fraction * gap,
         gapSec: gap,
         height: h,
+        value: value,
         collected: false,
         twinCollected: false,
-        missed: false,
       });
     }
   }
@@ -889,18 +899,20 @@ function saveSession() {
     // Twin self-evaluation: simulate how the (now-updated) twin would have done on this level
     const twinSim = simulateTwinScoresAvg(5);
     const levelAtSession = twinData.playerLevel || 1;
+    const totalValue = coins.reduce((sum, c) => sum + (c.value || 1), 0);
     twinData.scoreHistory.push({
       session: twinData.sessions,
       playerScore: score,
       twinScore: twinScore,           // 0 in TRAIN mode (twin doesn't play live)
       twinScoreSim: twinSim,           // simulated twin performance against this level
       totalCoins: coins.length,
+      totalValue: totalValue,          // sum of coin point values (level-up threshold uses this)
       level: levelAtSession,
       observationCount: currentPlayObservations.length,
       timestamp: new Date().toISOString(),
     });
-    // Level up if the player caught at least LEVEL_UP_RATIO of the coins this session
-    if (score >= Math.ceil(LEVEL_UP_RATIO * coins.length) && levelAtSession < MAX_LEVEL) {
+    // Level up if the player earned at least LEVEL_UP_RATIO of the total point value this session
+    if (score >= Math.ceil(LEVEL_UP_RATIO * totalValue) && levelAtSession < MAX_LEVEL) {
       twinData.playerLevel = levelAtSession + 1;
       leveledUpThisSession = true;
     }
@@ -966,6 +978,7 @@ function spawnDust(arr, x, y, color='255,200,230') {
 function updatePhysics(s, dt, g) {
   s.vy += g * dt;
   s.y += s.vy * dt;
+  if (s.y < CEILING_Y) { s.y = CEILING_Y; if (s.vy < 0) s.vy = 0; }
   if (s.y >= GROUND_Y) {
     const wasFlying = !s.onGround;
     s.y = GROUND_Y; s.vy = 0; s.onGround = true;
@@ -1032,17 +1045,18 @@ function update(dt) {
         && !coin.collected && dx > -22 && dx < 22 && Math.abs(coinY - ship.y) < 24) {
       coin.collected = true;
       coin.collectedAt = currentSongTime;
-      score++;
+      score += coin.value;
+      scorePopups.push({ x: SHIP_X, y: coinY, value: coin.value, life: 0.9, maxLife: 0.9, color: '255,215,0' });
       playCoinSound(988);
     }
     if (currentMode === 'watchtwin'
         && !coin.twinCollected && dx > -22 && dx < 22 && Math.abs(coinY - twinShip.y) < 24) {
       coin.twinCollected = true;
       coin.twinCollectedAt = currentSongTime;
-      twinScore++;
+      twinScore += coin.value;
+      scorePopups.push({ x: SHIP_X, y: coinY, value: coin.value, life: 0.9, maxLife: 0.9, color: '128,208,255' });
       playCoinSound(740);
     }
-    if (!coin.collected && !coin.twinCollected && screenX < SHIP_X - 30) coin.missed = true;
   }
 
   for (const arr of [dust, twinDust]) {
@@ -1055,6 +1069,8 @@ function update(dt) {
   twinDust = twinDust.filter(d => d.life > 0);
   for (const f of jumpFlashes) f.life -= dt;
   jumpFlashes = jumpFlashes.filter(f => f.life > 0);
+  for (const p of scorePopups) { p.life -= dt; p.y -= 40 * dt; }
+  scorePopups = scorePopups.filter(p => p.life > 0);
 
   const lastT = emphasisTimes[emphasisTimes.length - 1];
   if (currentSongTime > lastT + 2 && !sessionSavedThisPlay) {
@@ -1212,20 +1228,29 @@ function draw() {
         ctx.arc(screenX, y - elapsed * 40, 3 + (1 - a) * 4, 0, Math.PI * 2);
         ctx.fill();
       }
-    } else if (coin.missed) {
-      ctx.fillStyle = 'rgba(120,60,80,0.25)';
-      ctx.beginPath(); ctx.arc(screenX, y, 5, 0, Math.PI * 2); ctx.fill();
     } else {
-      const glow = ctx.createRadialGradient(screenX, y, 2, screenX, y, 22);
-      glow.addColorStop(0, 'rgba(255,215,0,0.6)');
+      // Higher-value coins are larger and glow brighter
+      const v = coin.value || 1;
+      const baseR = 8 + 1.8 * v;       // r ≈ 9.8, 11.6, 13.4 for v=1,2,3
+      const glowR = 18 + 5 * v;          // glow ≈ 23, 28, 33
+      const glow = ctx.createRadialGradient(screenX, y, 2, screenX, y, glowR);
+      glow.addColorStop(0, `rgba(255,215,0,${0.5 + 0.1 * v})`);
       glow.addColorStop(1, 'rgba(255,215,0,0)');
       ctx.fillStyle = glow;
-      ctx.beginPath(); ctx.arc(screenX, y, 22, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(screenX, y, glowR, 0, Math.PI * 2); ctx.fill();
       const pulse = 1 + 0.08 * Math.sin(currentSongTime * 6 + coin.time);
       ctx.fillStyle = '#ffd700';
-      ctx.beginPath(); ctx.arc(screenX, y, 9 * pulse, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(screenX, y, baseR * pulse, 0, Math.PI * 2); ctx.fill();
       ctx.fillStyle = '#fff5a0';
       ctx.beginPath(); ctx.arc(screenX - 3, y - 3, 3.5, 0, Math.PI * 2); ctx.fill();
+      // Tiny value badge on higher-value coins so the worth is legible
+      if (v > 1) {
+        ctx.fillStyle = '#5a2a10';
+        ctx.font = 'bold 10px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(String(v), screenX, y + 4);
+        ctx.textAlign = 'left';
+      }
     }
   }
 
@@ -1237,6 +1262,21 @@ function draw() {
     ctx.beginPath();
     ctx.arc(f.x, f.y + 8, r, 0, Math.PI * 2);
     ctx.stroke();
+  }
+
+  // Score popups: floating "+N" indicators that fade and drift up after a coin pickup
+  for (const p of scorePopups) {
+    const a = p.life / p.maxLife;
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 18px sans-serif';
+    ctx.fillStyle = `rgba(${p.color},${a})`;
+    ctx.strokeStyle = `rgba(40,15,5,${a * 0.7})`;
+    ctx.lineWidth = 3;
+    const txt = '+' + p.value;
+    ctx.strokeText(txt, p.x, p.y);
+    ctx.fillText(txt, p.x, p.y);
+    ctx.restore();
   }
 
   // Ship rendering, mode-aware
@@ -1358,12 +1398,12 @@ function draw() {
     if (hasProgress) {
       const last = sh[sh.length - 1];
       const best = Math.max(...sh.map(s => s.twinScoreSim));
-      const total = last.totalCoins || 74;
+      const total = last.totalValue || last.totalCoins || 74;
       const delta = sh.length > 1 ? last.twinScoreSim - sh[sh.length - 2].twinScoreSim : null;
       const deltaStr = delta == null ? '' : (delta > 0 ? `  ▲ +${delta}` : delta < 0 ? `  ▼ ${delta}` : '  · =');
       ctx.fillStyle = '#80d0ff';
       ctx.font = 'bold 13px sans-serif';
-      ctx.fillText(`TWIN PROGRESS · last sim ${last.twinScoreSim}/${total}${deltaStr} · best ${best}/${total}`, W/2, boxTop + 144);
+      ctx.fillText(`TWIN PROGRESS · last sim ${last.twinScoreSim}/${total} pts${deltaStr} · best ${best}/${total}`, W/2, boxTop + 144);
       ctx.fillStyle = '#a0d0ff';
       ctx.font = '18px monospace';
       const spark = buildSparkline(sh.map(s => s.twinScoreSim), total);
