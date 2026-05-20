@@ -561,7 +561,11 @@ let currentMode = null;
 let tProgress = 0;
 
 let isPaused = false;
-let leveledUpThisSession = false;  // set by saveSession, displayed in the menu after a level-up
+// Session-level state: starts at 1, can be bumped at loop boundaries when the active player
+// (or twin in WATCH-TWIN) collected enough of the just-finished loop's value.
+let currentSessionLevel = 1;
+let lastEvaluatedLoopIdx = -1;
+let levelUpFlashStart = -10;
 
 let gravityMult = 1.0;
 let score = 0;
@@ -632,8 +636,29 @@ function simulateTwinScore() {
   const songEnd = totalGameTime + 1.0;
   const g = BASE_GRAVITY * gravityMult;
   let y = GROUND_Y, vy = 0, schedIdx = 0, score = 0;
+  // Twin simulates its own performance-gated level progression
+  let simLevel = 1;
+  let simLastEvalLoop = -1;
 
   for (let t = 0; t < songEnd; t += dt) {
+    // Level-up check at loop boundaries (uses what the twin has collected so far)
+    const completedLoops = Math.floor(Math.max(0, t) / LOOP_DUR);
+    while (completedLoops > simLastEvalLoop + 1) {
+      const justFinished = simLastEvalLoop + 1;
+      if (simLevel < MAX_LEVEL) {
+        let totalVal = 0, collectedVal = 0;
+        for (let ci = 0; ci < coins.length; ci++) {
+          const c = coins[ci];
+          if (c.loopIdx !== justFinished) continue;
+          if (c.reqLevel > simLevel) continue;
+          totalVal += c.value;
+          if (collected[ci]) collectedVal += c.value;
+        }
+        if (totalVal > 0 && collectedVal / totalVal >= LEVEL_UP_RATIO) simLevel++;
+      }
+      simLastEvalLoop++;
+    }
+
     const tp = Math.max(0, Math.min(1, t / totalGameTime));
     const ramp = Math.max(0, Math.min(1, (tp - 0.5) * 2));
     const imp = JUMP_IMPULSE - 100 * ramp;
@@ -648,6 +673,7 @@ function simulateTwinScore() {
     for (let ci = 0; ci < coins.length; ci++) {
       if (collected[ci]) continue;
       const c = coins[ci];
+      if (c.reqLevel > simLevel) continue;  // locked tier
       const screenX = SHIP_X + SCROLL_SPEED * (c.time - t);
       const dx = screenX - SHIP_X;
       const coinY = GROUND_Y - c.height;
@@ -722,9 +748,13 @@ function setActiveButton() {
 function setScoreVisibility() {
   const playerScoreEl = document.getElementById('score');
   const twinScoreEl   = document.getElementById('twinScore');
-  if (currentMode === 'practice' || currentMode === 'train') {
+  if (currentMode === 'practice') {
     playerScoreEl.classList.remove('hidden');
     twinScoreEl.classList.add('hidden');
+  } else if (currentMode === 'train') {
+    // Show both — the player drives, the twin shadows; both scores visible for comparison
+    playerScoreEl.classList.remove('hidden');
+    twinScoreEl.classList.remove('hidden');
   } else if (currentMode === 'watchtwin') {
     playerScoreEl.classList.add('hidden');
     twinScoreEl.classList.remove('hidden');
@@ -774,7 +804,9 @@ function startGame(mode) {
 
   currentMode = mode;
   score = 0; twinScore = 0;
-  leveledUpThisSession = false;
+  currentSessionLevel = 1;
+  lastEvaluatedLoopIdx = -1;
+  levelUpFlashStart = -10;
   coins = []; dust = []; twinDust = []; jumpFlashes = []; scorePopups = [];
   ship.y = GROUND_Y; ship.vy = 0; ship.onGround = true; ship.tilt = 0;
   twinShip.y = GROUND_Y; twinShip.vy = 0; twinShip.onGround = true; twinShip.tilt = 0;
@@ -787,9 +819,17 @@ function startGame(mode) {
   scheduleSong(launchAt);
   songStartTime = launchAt;
 
-  // Difficulty ramps within the song instead of across sessions: loop 1 = 1 coin/gap,
-  // loop 2 = 2 coins/gap, loop 3 = 3 coins/gap. Every player gets the same gentle start
-  // and the same escalation, no localStorage memory needed.
+  // Performance-gated difficulty. Every gap pre-spawns 3 coin tiers; coins with
+  // reqLevel > currentSessionLevel stay hidden/uncollectable. Player advances by
+  // collecting >= LEVEL_UP_RATIO of a loop's value at the boundary check.
+  //   reqLevel 1: midpoint (always visible)
+  //   reqLevel 2: 0.75 of gap (unlocks when player demonstrates loop-1 skill)
+  //   reqLevel 3: 0.25 of gap (unlocks after loop-2 skill)
+  const COIN_TIERS = [
+    { fraction: 0.50, reqLevel: 1 },
+    { fraction: 0.75, reqLevel: 2 },
+    { fraction: 0.25, reqLevel: 3 },
+  ];
   for (let i = 0; i < emphasisTimes.length - 1; i++) {
     const t1 = emphasisTimes[i];
     const t2 = emphasisTimes[i + 1];
@@ -800,22 +840,24 @@ function startGame(mode) {
     // (1-beat loop-stitch artifacts default to 1).
     const value = Math.max(1, gapBeats - 1);
     const loopIdx = Math.floor(i / PER_LOOP.length);  // 0, 1, 2
-    const cpg = getCoinsPerGap(loopIdx + 1);            // 1, 2, 3 coins per gap
-    for (let j = 1; j <= cpg; j++) {
-      const fraction = j / (cpg + 1);  // evenly spaced between t1 and t2
+    for (const tier of COIN_TIERS) {
       coins.push({
-        time: t1 + fraction * gap,
+        time: t1 + tier.fraction * gap,
         gapSec: gap,
         height: h,
         value: value,
+        reqLevel: tier.reqLevel,
+        loopIdx,
         collected: false,
         twinCollected: false,
       });
     }
   }
 
-  // Only build twin schedule in WATCH-TWIN mode
-  if (mode === 'watchtwin') {
+  // Build twin schedule for WATCH-TWIN (twin is the actor) and TRAIN (twin is a
+  // semi-transparent shadow alongside the player so the data flywheel is visible).
+  // PRACTICE stays twin-free so players can warm up without distraction.
+  if (mode === 'watchtwin' || mode === 'train') {
     planTwinSchedule();
   } else {
     twinTapSchedule = [];
@@ -1005,6 +1047,24 @@ function update(dt) {
 
   checkSegmentCrossing();
 
+  // Performance-gated level-up at loop boundaries.
+  // The active player is the human in PRACTICE/TRAIN, the twin in WATCH-TWIN.
+  const completedLoops = Math.floor(Math.max(0, currentSongTime) / LOOP_DUR);
+  while (completedLoops > lastEvaluatedLoopIdx + 1) {
+    const justFinishedLoop = lastEvaluatedLoopIdx + 1;
+    if (currentSessionLevel < MAX_LEVEL) {
+      const loopCoins = coins.filter(c => c.loopIdx === justFinishedLoop && c.reqLevel <= currentSessionLevel);
+      const totalVal = loopCoins.reduce((s, c) => s + c.value, 0);
+      const collectedKey = (currentMode === 'watchtwin') ? 'twinCollected' : 'collected';
+      const collectedVal = loopCoins.filter(c => c[collectedKey]).reduce((s, c) => s + c.value, 0);
+      if (totalVal > 0 && collectedVal / totalVal >= LEVEL_UP_RATIO) {
+        currentSessionLevel++;
+        levelUpFlashStart = currentSongTime;
+      }
+    }
+    lastEvaluatedLoopIdx++;
+  }
+
   const g = BASE_GRAVITY * gravityMult;
 
   // Player physics: only in PRACTICE or TRAIN
@@ -1014,8 +1074,8 @@ function update(dt) {
     ship.tilt = Math.max(-0.5, Math.min(0.5, ship.vy / 900));
   }
 
-  // Twin physics: only in WATCH TWIN
-  if (currentMode === 'watchtwin') {
+  // Twin physics: in WATCH TWIN (twin is the actor) or TRAIN (passive shadow alongside)
+  if (currentMode === 'watchtwin' || currentMode === 'train') {
     const twinLanded = updatePhysics(twinShip, dt, g);
     if (twinLanded) spawnDust(twinDust, SHIP_X, GROUND_Y, '128,208,255');
     twinShip.tilt = Math.max(-0.5, Math.min(0.5, twinShip.vy / 900));
@@ -1031,6 +1091,7 @@ function update(dt) {
 
   // Coin collection — only the active actor can collect in each mode
   for (const coin of coins) {
+    if (coin.reqLevel > currentSessionLevel) continue;  // locked tier, not yet earned
     const screenX = SHIP_X + SCROLL_SPEED * (coin.time - currentSongTime);
     const dx = screenX - SHIP_X;
     const coinY = GROUND_Y - coin.height;
@@ -1042,7 +1103,7 @@ function update(dt) {
       scorePopups.push({ x: SHIP_X, y: coinY, value: coin.value, life: 0.9, maxLife: 0.9, color: '255,215,0' });
       playCoinSound(988);
     }
-    if (currentMode === 'watchtwin'
+    if ((currentMode === 'watchtwin' || currentMode === 'train')
         && !coin.twinCollected && dx > -22 && dx < 22 && Math.abs(coinY - twinShip.y) < 24) {
       coin.twinCollected = true;
       coin.twinCollectedAt = currentSongTime;
@@ -1190,6 +1251,7 @@ function draw() {
   }
 
   for (const coin of coins) {
+    if (coin.reqLevel > currentSessionLevel) continue;  // locked tier — invisible until unlocked
     const screenX = SHIP_X + SCROLL_SPEED * (coin.time - currentSongTime);
     if (screenX < -30 || screenX > W + 30) continue;
     const y = GROUND_Y - coin.height;
@@ -1275,16 +1337,20 @@ function draw() {
   // Ship rendering, mode-aware
   if (currentMode === 'watchtwin') {
     drawShip(SHIP_X, twinShip.y, !twinShip.onGround, twinShip.tilt, 'twin', 1.0);
-  } else if (currentMode === 'practice' || currentMode === 'train') {
+  } else if (currentMode === 'train') {
+    // Twin shadows the player at reduced opacity so its learning is visible alongside you
+    drawShip(SHIP_X, twinShip.y, !twinShip.onGround, twinShip.tilt, 'twin', 0.55);
+    drawShip(SHIP_X, ship.y, !ship.onGround, ship.tilt, 'player', 1.0);
+  } else if (currentMode === 'practice') {
     drawShip(SHIP_X, ship.y, !ship.onGround, ship.tilt, 'player', 1.0);
   } else {
     // Idle / menu — show the player ship at rest as a preview
     drawShip(SHIP_X, ship.y, false, 0, 'player', 1.0);
   }
 
-  // Level badge top-right during play — escalates with song progress (1 → 2 → 3 per loop)
+  // Level badge top-right during play — performance-gated, advances when player earns it
   if (isPlaying) {
-    const lvl = Math.min(MAX_LEVEL, Math.max(1, Math.floor(Math.max(0, currentSongTime) / LOOP_DUR) + 1));
+    const lvl = currentSessionLevel;
     ctx.save();
     ctx.font = 'bold 12px sans-serif';
     const txt = `LEVEL ${lvl}`;
@@ -1302,6 +1368,24 @@ function draw() {
     ctx.textAlign = 'center';
     ctx.fillText(txt, x0 + boxW / 2, y0 + 15);
     ctx.textAlign = 'left';
+    ctx.restore();
+  }
+
+  // Level-up flash: ▲ LEVEL UP banner that briefly appears at the loop boundary where the
+  // active player unlocked a new tier. Two-second fade-out so it doesn't overstay.
+  if (isPlaying && currentSongTime >= levelUpFlashStart && currentSongTime - levelUpFlashStart < 2) {
+    const elapsed = currentSongTime - levelUpFlashStart;
+    const fade = Math.max(0, 1 - elapsed / 2);
+    const scale = 1 + elapsed * 0.08;
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.font = `bold ${Math.floor(26 * scale)}px sans-serif`;
+    ctx.fillStyle = `rgba(255,210,90,${fade})`;
+    ctx.strokeStyle = `rgba(60,30,0,${fade * 0.8})`;
+    ctx.lineWidth = 3;
+    const txt = `▲ LEVEL UP → ${currentSessionLevel}`;
+    ctx.strokeText(txt, W / 2, H / 3);
+    ctx.fillText(txt, W / 2, H / 3);
     ctx.restore();
   }
 
