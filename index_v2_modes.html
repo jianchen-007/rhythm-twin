@@ -355,13 +355,12 @@ function buildSparkline(values, total) {
 
 function refreshTwinStatus() {
   const el = document.getElementById('twinStatus');
-  const lvl = twinData.playerLevel || 1;
   if (twinData.sessions === 0 && twinData.observations.length === 0) {
-    el.textContent = `LEVEL ${lvl} · TWIN NOT YET TRAINED — TRY PRACTICE FIRST, THEN TRAIN`;
+    el.textContent = 'TWIN: NOT YET TRAINED — TRY PRACTICE FIRST, THEN TRAIN';
   } else {
     const sh = twinData.scoreHistory || [];
     const sims = sh.filter(s => s.twinScoreSim != null);
-    let txt = `LEVEL ${lvl} · TWIN: ${twinData.sessions} SESSION${twinData.sessions === 1 ? '' : 'S'}`;
+    let txt = `TWIN: ${twinData.sessions} SESSION${twinData.sessions === 1 ? '' : 'S'}`;
     if (sims.length > 0) {
       const last = sims[sims.length - 1];
       const best = Math.max(...sims.map(s => s.twinScoreSim));
@@ -635,10 +634,9 @@ function startGame(mode) {
   scheduleSong(launchAt);
   songStartTime = launchAt;
 
-  // Coin density scales with player level: 1 → 1 coin/gap, 2 → 2 coins/gap, etc.
-  // All coins in a gap are at the same altitude (gap²-scaled). Extra coins force the
-  // player to sustain altitude longer via rapid taps, not just hit a single apex.
-  const cpg = getCoinsPerGap(twinData.playerLevel || 1);
+  // Difficulty ramps within the song instead of across sessions: loop 1 = 1 coin/gap,
+  // loop 2 = 2 coins/gap, loop 3 = 3 coins/gap. Every player gets the same gentle start
+  // and the same escalation, no localStorage memory needed.
   for (let i = 0; i < emphasisTimes.length - 1; i++) {
     const t1 = emphasisTimes[i];
     const t2 = emphasisTimes[i + 1];
@@ -648,6 +646,8 @@ function startGame(mode) {
     // Coin value scales with the height tier: 2-beat=1, 3-beat=2, 4-beat=3
     // (1-beat loop-stitch artifacts default to 1).
     const value = Math.max(1, gapBeats - 1);
+    const loopIdx = Math.floor(i / PER_LOOP.length);  // 0, 1, 2
+    const cpg = getCoinsPerGap(loopIdx + 1);            // 1, 2, 3 coins per gap
     for (let j = 1; j <= cpg; j++) {
       const fraction = j / (cpg + 1);  // evenly spaced between t1 and t2
       coins.push({
@@ -743,26 +743,19 @@ function saveSession() {
     for (const obs of currentPlayObservations) twinData.observations.push(obs);
     twinData.sessions++;
     if (!twinData.scoreHistory) twinData.scoreHistory = [];
-    // Twin self-evaluation: simulate how the (now-updated) twin would have done on this level
+    // Twin self-evaluation: simulate how the (now-updated) twin would have done on this song
     const twinSim = simulateTwinScoresAvg(5);
-    const levelAtSession = twinData.playerLevel || 1;
     const totalValue = coins.reduce((sum, c) => sum + (c.value || 1), 0);
     twinData.scoreHistory.push({
       session: twinData.sessions,
       playerScore: score,
       twinScore: twinScore,           // 0 in TRAIN mode (twin doesn't play live)
-      twinScoreSim: twinSim,           // simulated twin performance against this level
+      twinScoreSim: twinSim,           // simulated twin performance against this song
       totalCoins: coins.length,
-      totalValue: totalValue,          // sum of coin point values (level-up threshold uses this)
-      level: levelAtSession,
+      totalValue: totalValue,          // sum of coin point values
       observationCount: currentPlayObservations.length,
       timestamp: new Date().toISOString(),
     });
-    // Level up if the player earned at least LEVEL_UP_RATIO of the total point value this session
-    if (score >= Math.ceil(LEVEL_UP_RATIO * totalValue) && levelAtSession < MAX_LEVEL) {
-      twinData.playerLevel = levelAtSession + 1;
-      leveledUpThisSession = true;
-    }
     if (twinData.observations.length > 3000) {
       twinData.observations = twinData.observations.slice(-3000);
     }
@@ -1116,9 +1109,9 @@ function draw() {
     drawShip(SHIP_X, ship.y, false, 0, 'player', 1.0);
   }
 
-  // Level badge top-right during play
+  // Level badge top-right during play — escalates with song progress (1 → 2 → 3 per loop)
   if (isPlaying) {
-    const lvl = twinData.playerLevel || 1;
+    const lvl = Math.min(MAX_LEVEL, Math.max(1, Math.floor(Math.max(0, currentSongTime) / LOOP_DUR) + 1));
     ctx.save();
     ctx.font = 'bold 12px sans-serif';
     const txt = `LEVEL ${lvl}`;
@@ -1191,18 +1184,6 @@ function draw() {
   } else if (!isPlaying) {
     const sh = (twinData.scoreHistory || []).filter(s => s.twinScoreSim != null);
     const hasProgress = sh.length > 0;
-    const lvl = twinData.playerLevel || 1;
-    // LEVEL UP! banner above the menu when the previous session triggered a level-up
-    if (leveledUpThisSession) {
-      ctx.save();
-      ctx.textAlign = 'center';
-      ctx.font = 'bold 22px sans-serif';
-      const pulse = 0.85 + 0.15 * Math.sin(currentSongTime * 4);
-      ctx.fillStyle = `rgba(255,210,90,${pulse})`;
-      ctx.fillText(`★ LEVEL UP ! · NOW LEVEL ${lvl} · ${getCoinsPerGap(lvl)} COINS PER GAP ★`, W / 2, H / 2 - 130);
-      ctx.textAlign = 'left';
-      ctx.restore();
-    }
     const boxH = hasProgress ? 230 : 180;
     const boxTop = H/2 - boxH/2;
     ctx.fillStyle = 'rgba(0,0,0,0.6)';
